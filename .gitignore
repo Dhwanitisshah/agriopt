@@ -1,6 +1,7 @@
 .venv/
 data/raw/
 data/processed/
+/models/
 .env
 __pycache__/
 *.py[cod]

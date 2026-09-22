@@ -1,0 +1,64 @@
+import numpy as np
+import pandas as pd
+import pytest
+
+from agriopt.config import CROPS, STATE, TEST_START_YEAR, TRAIN_END_YEAR, YIELD_MODEL_METADATA_PATH, YIELD_MODEL_PATH
+from agriopt.models.yield_model import (
+    BaselineLast,
+    BaselineMean,
+    expected_yield_saleable,
+    load_metadata,
+    load_model,
+    load_model_frame,
+    predict_yield,
+    train_test_split_by_year,
+)
+
+
+def test_no_production_or_area_in_main_features():
+    metadata = load_metadata()
+    assert "area_ha" not in metadata["num_cols"]
+    assert "Production" not in metadata["num_cols"] and "Production" not in metadata["cat_cols"]
+
+
+def test_train_test_split_years():
+    df, _ = load_model_frame()
+    train, test = train_test_split_by_year(df)
+    assert train["year"].max() <= TRAIN_END_YEAR
+    assert test["year"].min() >= TEST_START_YEAR
+    assert train["year"].max() < test["year"].min()
+
+
+def test_saved_model_loads_and_predicts_positive_for_all_crops():
+    assert YIELD_MODEL_PATH.exists()
+    assert YIELD_MODEL_METADATA_PATH.exists()
+    load_model()  # just confirm it deserializes
+
+    for crop in CROPS:
+        pred = predict_yield(crop, season="Kharif", state=STATE, year=2018, rainfall_mm=1000.0)
+        assert np.isfinite(pred)
+        assert pred > 0
+
+
+def test_expected_yield_saleable_positive_and_deterministic():
+    for crop in CROPS:
+        r1 = expected_yield_saleable(crop)
+        r2 = expected_yield_saleable(crop)
+        assert r1["value"] > 0
+        assert np.isfinite(r1["value"])
+        assert r1["value"] == pytest.approx(r2["value"])
+        assert r1["year"] == r2["year"]
+        assert r1["rainfall_mm"] == pytest.approx(r2["rainfall_mm"])
+
+
+def test_baselines_predict_for_every_maharashtra_test_row():
+    df, _ = load_model_frame()
+    train, test = train_test_split_by_year(df)
+    mh_test = test[test["state"] == STATE]
+    assert len(mh_test) > 0
+
+    for baseline_cls in (BaselineMean, BaselineLast):
+        model = baseline_cls().fit(train)
+        preds = model.predict(mh_test)
+        assert len(preds) == len(mh_test)
+        assert np.all(np.isfinite(preds))

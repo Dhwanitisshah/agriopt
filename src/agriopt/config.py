@@ -21,6 +21,8 @@ DATA_RAW = REPO_ROOT / "data" / "raw"
 DATA_PROCESSED = REPO_ROOT / "data" / "processed"
 DATA_REFERENCE = REPO_ROOT / "data" / "reference"
 REPORTS_EDA = REPO_ROOT / "reports" / "eda"
+REPORTS_RESULTS = REPO_ROOT / "reports" / "results"
+MODELS_DIR = REPO_ROOT / "models"
 
 YIELD_RAW_CSV = DATA_RAW / "yield" / "crop_yield.csv"
 PRICE_RAW_CSV = DATA_RAW / "prices" / "Agriculture_price_dataset.csv"
@@ -30,6 +32,9 @@ YIELD_CLEAN_PARQUET = DATA_PROCESSED / "yield_clean.parquet"
 PRICES_MONTHLY_PARQUET = DATA_PROCESSED / "prices_monthly.parquet"
 
 CROP_REFERENCE_CSV = DATA_REFERENCE / "crop_reference.csv"
+
+YIELD_MODEL_PATH = MODELS_DIR / "yield_best.joblib"
+YIELD_MODEL_METADATA_PATH = MODELS_DIR / "yield_best.json"
 
 ENV_FILE = REPO_ROOT / ".env"
 
@@ -51,6 +56,23 @@ CROPS = [
 # Cereals/pulses among the 8 target crops: rice, wheat, jowar, tur are the
 # original set; maize (a cereal) joins them after the onion -> maize swap.
 FOOD_CROPS = ["rice", "wheat", "jowar", "tur", "maize"]
+
+# canonical crop -> season with the most Maharashtra rows in yield_clean.parquet
+# (ties broken by mean area_ha, i.e. the season where more land is actually
+# under that crop -- row count alone ties rice Kharif/Summer 23-23 and jowar
+# Kharif/Rabi 23-23; area breaks both decisively, and confirms Maharashtra's
+# well-known rabi-jowar dominance rather than defaulting to kharif for every
+# crop). Used by yield_model.expected_yield_saleable().
+MAIN_SEASON = {
+    "rice": "Kharif",
+    "wheat": "Rabi",
+    "jowar": "Rabi",
+    "soybean": "Kharif",
+    "cotton": "Kharif",
+    "sugarcane": "Whole Year",
+    "tur": "Kharif",
+    "maize": "Kharif",
+}
 
 # canonical crop -> exact name in each raw/external dataset.
 #
