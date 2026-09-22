@@ -30,10 +30,14 @@ from agriopt.data.yield_data import (
     find_outliers_iqr,
     leakage_yield_vs_production,
     load_raw_yield,
+    maharashtra_candidate_summary,
     maharashtra_target_counts,
+    unit_audit,
 )
 
 WEAK_DATA_ROW_THRESHOLD = 10
+EIGHTH_CROP_CANDIDATES = ["Maize", "Groundnut", "Bajra", "Gram"]
+UNIT_RATIO_SANITY_BAND = (0.5, 2.0)
 
 
 def main() -> None:
@@ -47,6 +51,25 @@ def main() -> None:
     lines: list[str] = []
     lines.append("# Yield dataset audit\n")
     lines.append(f"Source: `{YIELD_RAW_CSV}`\n")
+
+    # --- 8th crop selection (onion -> replacement) ----------------------------
+    lines.append("\n## 8th crop selection (onion had 1 Maharashtra row; replaced)\n")
+    candidates = maharashtra_candidate_summary(df, EIGHTH_CROP_CANDIDATES, state=STATE)
+    lines.append("\n| crop | n_rows | n_years | year_min | year_max |\n|---|---|---|---|---|\n")
+    for _, row in candidates.iterrows():
+        lines.append(
+            f"| {row['crop_name']} | {row['n_rows']} | {row['n_years']} | "
+            f"{row['year_min']} | {row['year_max']} |\n"
+        )
+    chosen = candidates.iloc[0]["crop_name"]
+    lines.append(f"\n**Chosen 8th crop: {chosen}** (most {STATE} rows and year coverage "
+                  f"among the candidates).\n")
+    print(f"8th crop selection: {chosen} (n_rows={candidates.iloc[0]['n_rows']}, "
+          f"n_years={candidates.iloc[0]['n_years']})")
+    configured_maize = CROP_NAME_MAP.get("maize", {}).get("yield")
+    if configured_maize != chosen:
+        print(f"WARNING: config.CROP_NAME_MAP['maize']['yield']={configured_maize!r} "
+              f"does not match the data-driven choice {chosen!r} -- update config.py.")
 
     # --- a) shape, dtypes, nulls, year range, #states, #crops --------------
     lines.append("## a) Overview\n")
@@ -121,6 +144,62 @@ def main() -> None:
         )
     print(f"Leakage 2: corr(fert,area)={corr['fertilizer_vs_area']:.4f}, "
           f"corr(pest,area)={corr['pesticide_vs_area']:.4f} (totals => {leak2})")
+
+    # --- Unit audit: ratio = Yield / (Production/Area), per target crop -----
+    lines.append("\n## Unit audit\n")
+    lines.append(
+        f"ratio = Yield / (Production/Area), computed on {STATE} rows (Area > 0) per target "
+        "crop. A ratio near 1 confirms Yield and Production/Area are internally self-consistent "
+        "(same underlying basis) -- it does NOT by itself prove which real-world quantity "
+        "(e.g. paddy vs milled rice, lint bales vs tonnes) that basis represents. See "
+        "`docs/units.md` for the full reasoning behind `YIELD_TO_SALEABLE_QTL_PER_HA`.\n"
+    )
+    audit = unit_audit(df, state=STATE)
+    lines.append(
+        "\n| crop | n | ratio_median | ratio_IQR | Yield median | Production median |\n"
+        "|---|---|---|---|---|---|\n"
+    )
+    contradictions = []
+    for _, row in audit.iterrows():
+        if row["n"] == 0:
+            lines.append(f"| {row['crop']} | 0 | - | - | - | - |\n")
+            continue
+        lines.append(
+            f"| {row['crop']} | {row['n']} | {row['ratio_median']:.4f} | "
+            f"[{row['ratio_q1']:.4f}, {row['ratio_q3']:.4f}] | {row['yield_median']:.4f} | "
+            f"{row['production_median']:.1f} |\n"
+        )
+        if not (UNIT_RATIO_SANITY_BAND[0] <= row["ratio_median"] <= UNIT_RATIO_SANITY_BAND[1]):
+            contradictions.append(row["crop"])
+
+    if contradictions:
+        lines.append(
+            f"\n**CONTRADICTION**: ratio_median outside {UNIT_RATIO_SANITY_BAND} for: "
+            f"{contradictions}. This means Yield and Production/Area disagree by more than "
+            "2x for these crops, which is NOT explained by the milling/ginning assumptions "
+            "below -- STOP and resolve before trusting `YIELD_TO_SALEABLE_QTL_PER_HA` for them.\n"
+        )
+        print(f"UNIT AUDIT CONTRADICTION for: {contradictions} -- see eda_report.md")
+    else:
+        lines.append(
+            "\nAll target-crop ratios fall within "
+            f"{UNIT_RATIO_SANITY_BAND} of 1 -- consistent with (does not contradict) the "
+            "milled-rice and cotton-bales assumptions below. Cotton's Production magnitude "
+            "(median ~4.6M for Maharashtra alone) is only plausible as **bales**, not tonnes "
+            "(India's total national lint production is ~30-34M bales/yr), which supports "
+            "treating cotton Yield as bales/ha rather than tonnes/ha.\n"
+        )
+
+    lines.append(
+        "\n### Assumptions used for Yield -> quintals of marketed product (see `agriopt.config`)\n"
+        "- **rice**: dataset Yield is MILLED RICE t/ha (ASSUMPTION). "
+        "paddy t/ha = Yield / RICE_OUTTURN (0.67); marketed product = paddy.\n"
+        "- **cotton**: dataset Yield is LINT COTTON bales/ha (ASSUMPTION). "
+        "lint_kg/ha = Yield * BALE_KG (170); kapas_kg/ha = lint_kg/ha / GINNING_OUTTURN (0.34); "
+        "marketed product = kapas.\n"
+        "- **all others** (wheat, jowar, soybean, sugarcane, tur, maize): tonnes/ha -> "
+        "quintals/ha (x10), no product-form conversion.\n"
+    )
 
     # --- e) outliers, invalid areas, duplicates -------------------------------
     lines.append("\n## e) Data quality: outliers, invalid areas, duplicates\n")

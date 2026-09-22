@@ -134,3 +134,54 @@ def maharashtra_target_counts(df: pd.DataFrame, state: str = "Maharashtra") -> p
         for season, ssub in sub.groupby("Season"):
             rows.append({"crop": canon, "season": season, "n_rows": len(ssub)})
     return pd.DataFrame(rows)
+
+
+def maharashtra_candidate_summary(df: pd.DataFrame, crop_names: list[str], state: str = "Maharashtra") -> pd.DataFrame:
+    """Row count / year coverage for candidate crop names (raw dataset Crop
+    values) in the given state -- used to pick a replacement crop."""
+    mh = df[df["State"] == state]
+    rows = []
+    for name in crop_names:
+        sub = mh[mh["Crop"] == name]
+        years = sorted(sub["Crop_Year"].unique())
+        rows.append(
+            {
+                "crop_name": name,
+                "n_rows": len(sub),
+                "n_years": len(years),
+                "year_min": years[0] if years else None,
+                "year_max": years[-1] if years else None,
+            }
+        )
+    return pd.DataFrame(rows).sort_values("n_rows", ascending=False).reset_index(drop=True)
+
+
+def unit_audit(df: pd.DataFrame, state: str = "Maharashtra") -> pd.DataFrame:
+    """For each target crop in `state`, compute ratio = Yield / (Production/Area)
+    (Area > 0). Reports median + IQR of that ratio (internal Yield/Production
+    self-consistency check) plus Production/Yield magnitudes (to sanity-check
+    real-world units externally, e.g. against known state production totals).
+    """
+    mh = df[(df["State"] == state) & (df["Area"] > 0)].copy()
+    implied_yield = mh["Production"] / mh["Area"]
+    mh["ratio"] = mh["Yield"] / implied_yield
+
+    rows = []
+    for canon, names in CROP_NAME_MAP.items():
+        sub = mh[mh["Crop"] == names["yield"]]
+        if sub.empty:
+            rows.append({"crop": canon, "n": 0})
+            continue
+        q1, med, q3 = sub["ratio"].quantile([0.25, 0.5, 0.75])
+        rows.append(
+            {
+                "crop": canon,
+                "n": len(sub),
+                "ratio_median": med,
+                "ratio_q1": q1,
+                "ratio_q3": q3,
+                "yield_median": sub["Yield"].median(),
+                "production_median": sub["Production"].median(),
+            }
+        )
+    return pd.DataFrame(rows)

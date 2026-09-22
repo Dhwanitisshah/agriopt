@@ -19,6 +19,9 @@ REQUIRED_COLUMNS = [
     "fert_k_kg_ha",
     "fert_source",
     "verified",
+    "admin_price_rs_per_qtl",
+    "admin_price_type",
+    "admin_price_source",
 ]
 
 # columns that must be populated (non-null) for a crop to be usable in the

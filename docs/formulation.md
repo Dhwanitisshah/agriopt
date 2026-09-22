@@ -10,12 +10,16 @@
 **Maximize Profit**
 
 ```
-Profit = sum_i x_i * (Yhat_i * 10 * Phat_i - C_i)
+Profit = sum_i x_i * (Qhat_i * Phat_i - C_i)
 ```
 
-- `Yhat_i` = predicted yield, tonnes/ha
-- `Yhat_i * 10` converts tonnes/ha -> quintal/ha (1 t = 10 quintal)
-- `Phat_i` = predicted price, Rs/quintal
+- `Yhat_i` = predicted dataset-basis yield, t/ha (or bales/ha for cotton)
+- `Qhat_i = YIELD_TO_SALEABLE_QTL_PER_HA[i](Yhat_i)` = predicted yield converted
+  to quintal/ha of the crop's MARKETED product (see `docs/units.md` -- for
+  most crops this is `Yhat_i * 10`, but rice converts milled-rice t/ha to
+  paddy quintal/ha and cotton converts lint bales/ha to kapas quintal/ha)
+- `Phat_i` = predicted price of the marketed product, Rs/quintal (rice uses
+  the paddy price series; cotton uses the kapas/raw-cotton series)
 - `C_i` = cost of cultivation, Rs/ha (`crop_reference.csv: cost_rs_per_ha`)
 
 **Minimize Water**
@@ -40,7 +44,10 @@ Fert = sum_i x_i * (N_i + P_i + K_i)
 
 - Land: `sum_i x_i <= LAND`
 - Water budget: `Water <= WATER_BUDGET`
-- Food security: `x_rice + x_wheat + x_jowar + x_tur >= 0.3 * LAND`
+- Food security: `sum_{i in FOOD_CROPS} x_i >= 0.3 * LAND`, where
+  `FOOD_CROPS = agriopt.config.FOOD_CROPS = [rice, wheat, jowar, tur, maize]`
+  (cereals/pulses among the 8 target crops; maize joined after the
+  onion -> maize swap in Phase 0.5)
 - Diversification cap: `x_i <= 0.5 * LAND` for every crop `i`
 - Non-negativity: `x_i >= 0`
 
@@ -68,9 +75,11 @@ hardcoded constants.
 
 ## Status
 
-This document describes the intended formulation for later phases. Phase 0
-does not implement the yield model, price model, or optimizer — see
+This document describes the intended formulation for later phases. Phase 0 /
+0.5 do not implement the yield model, price model, or optimizer — see
 `reports/eda/eda_report.md` and `reports/eda/price_report.md` for what the
-underlying data actually supports (in particular: 5 of 8 crops currently
-have no price series in the mandi dataset, and `tur` has no FAO TM3 water
-figure).
+underlying data actually supports. In particular: sugarcane has no mandi
+price series at all (government FRP instead, see `admin_price_rs_per_qtl` in
+`crop_reference.csv`, currently a TODO placeholder); `tur` has no FAO TM3
+water figure; and the rice/cotton unit conversions in `docs/units.md` are
+flagged ASSUMPTION pending verification.

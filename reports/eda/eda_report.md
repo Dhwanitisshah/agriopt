@@ -1,5 +1,16 @@
 # Yield dataset audit
 Source: `C:\Users\Dhwanit Shah\Desktop\agriopt\data\raw\yield\crop_yield.csv`
+
+## 8th crop selection (onion had 1 Maharashtra row; replaced)
+
+| crop | n_rows | n_years | year_min | year_max |
+|---|---|---|---|---|
+| Maize | 68 | 23 | 1997 | 2019 |
+| Groundnut | 44 | 22 | 1998 | 2019 |
+| Bajra | 23 | 23 | 1997 | 2019 |
+| Gram | 23 | 23 | 1997 | 2019 |
+
+**Chosen 8th crop: Maize** (most Maharashtra rows and year coverage among the candidates).
 ## a) Overview
 - Shape: 19689 rows x 10 columns
 - Dtypes:
@@ -43,9 +54,12 @@ Source: `C:\Users\Dhwanit Shah\Desktop\agriopt\data\raw\yield\crop_yield.csv`
 | sugarcane | Kharif | 2 |
 | sugarcane | Whole Year | 21 |
 | tur | Kharif | 23 |
-| onion | Whole Year | 1 |
+| maize | Autumn | 1 |
+| maize | Kharif | 23 |
+| maize | Rabi | 23 |
+| maize | Summer | 21 |
 
-**Weak-data crops** (total Maharashtra rows < 10): ['onion']
+**Weak-data crops** (total Maharashtra rows < 10): none
 
 ## c) Leakage check 1: Yield vs Production/Area
 - Rows compared (Area > 0): 19689
@@ -57,6 +71,27 @@ Source: `C:\Users\Dhwanit Shah\Desktop\agriopt\data\raw\yield\crop_yield.csv`
 - corr(Fertilizer, Area) = 0.9733
 - corr(Pesticide, Area) = 0.9735
 - **Both correlations > 0.8 -> Fertilizer/Pesticide are farm-level totals, not per-hectare rates. Converted to `fertilizer_per_ha`/`pesticide_per_ha` and raw totals dropped.**
+
+## Unit audit
+ratio = Yield / (Production/Area), computed on Maharashtra rows (Area > 0) per target crop. A ratio near 1 confirms Yield and Production/Area are internally self-consistent (same underlying basis) -- it does NOT by itself prove which real-world quantity (e.g. paddy vs milled rice, lint bales vs tonnes) that basis represents. See `docs/units.md` for the full reasoning behind `YIELD_TO_SALEABLE_QTL_PER_HA`.
+
+| crop | n | ratio_median | ratio_IQR | Yield median | Production median |
+|---|---|---|---|---|---|
+| rice | 46 | 0.9644 | [0.7301, 1.0195] | 1.9970 | 994311.5 |
+| wheat | 23 | 0.9533 | [0.9454, 0.9677] | 1.3887 | 1308500.0 |
+| jowar | 46 | 1.0944 | [0.9509, 1.2448] | 0.8941 | 1691200.0 |
+| soybean | 22 | 1.0792 | [1.0293, 1.1815] | 1.2416 | 2373250.0 |
+| cotton | 23 | 1.0593 | [0.9866, 1.1832] | 1.4544 | 4617500.0 |
+| sugarcane | 23 | 0.8819 | [0.8411, 0.9160] | 69.6215 | 64159300.0 |
+| tur | 23 | 0.8927 | [0.8532, 0.9325] | 0.6394 | 814600.0 |
+| maize | 68 | 0.8780 | [0.8232, 0.9587] | 1.6323 | 217850.0 |
+
+All target-crop ratios fall within (0.5, 2.0) of 1 -- consistent with (does not contradict) the milled-rice and cotton-bales assumptions below. Cotton's Production magnitude (median ~4.6M for Maharashtra alone) is only plausible as **bales**, not tonnes (India's total national lint production is ~30-34M bales/yr), which supports treating cotton Yield as bales/ha rather than tonnes/ha.
+
+### Assumptions used for Yield -> quintals of marketed product (see `agriopt.config`)
+- **rice**: dataset Yield is MILLED RICE t/ha (ASSUMPTION). paddy t/ha = Yield / RICE_OUTTURN (0.67); marketed product = paddy.
+- **cotton**: dataset Yield is LINT COTTON bales/ha (ASSUMPTION). lint_kg/ha = Yield * BALE_KG (170); kapas_kg/ha = lint_kg/ha / GINNING_OUTTURN (0.34); marketed product = kapas.
+- **all others** (wheat, jowar, soybean, sugarcane, tur, maize): tonnes/ha -> quintals/ha (x10), no product-form conversion.
 
 ## e) Data quality: outliers, invalid areas, duplicates
 
@@ -133,3 +168,17 @@ Source: `C:\Users\Dhwanit Shah\Desktop\agriopt\data\raw\yield\crop_yield.csv`
 
 ## Cleaned output
 - `C:\Users\Dhwanit Shah\Desktop\agriopt\data\processed\yield_clean.parquet`: 19689 rows (all-India, `Production` dropped, per-hectare rates, `is_target_crop` flag).
+
+## Price coverage (CEDA primary + Kaggle secondary, merged)
+Source: `C:\Users\Dhwanit Shah\Desktop\agriopt\data\processed\prices_monthly.parquet` (built by `scripts/03_fetch_ceda_prices.py`).
+
+| crop | min_month | max_month | n_months | n_missing_months | last_month | flag |
+|---|---|---|---|---|---|---|
+| rice | 2001-06-01 | 2025-10-01 | 285 | 8.0 | 2025-10-01 |  |
+| wheat | 2001-03-01 | 2025-10-01 | 296 | 0.0 | 2025-10-01 |  |
+| jowar | 2001-03-01 | 2025-10-01 | 295 | 1.0 | 2025-10-01 |  |
+| soybean | 2001-05-01 | 2025-10-01 | 294 | 0.0 | 2025-10-01 |  |
+| cotton | 2002-12-01 | 2025-10-01 | 263 | 12.0 | 2025-10-01 |  |
+| sugarcane | - | - | 0 | - | - | **no mandi series (sugarcane: FRP admin price)** |
+| tur | 2001-12-01 | 2025-10-01 | 278 | 9.0 | 2025-10-01 |  |
+| maize | 2001-04-01 | 2025-10-01 | 294 | 1.0 | 2025-10-01 |  |

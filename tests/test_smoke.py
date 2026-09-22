@@ -1,4 +1,7 @@
+from unittest.mock import MagicMock
+
 import pandas as pd
+import pytest
 
 from agriopt.config import (
     CROPS,
@@ -7,15 +10,25 @@ from agriopt.config import (
     PRICES_MONTHLY_PARQUET,
     STATE,
     YIELD_CLEAN_PARQUET,
+    YIELD_TO_SALEABLE_QTL_PER_HA,
 )
-from agriopt.data import price_data, reference, yield_data  # noqa: F401
+from agriopt.data import ceda_client, price_data, reference, yield_data  # noqa: F401
+
+MIN_MONTHS = 60
 
 
 def test_imports():
     import agriopt  # noqa: F401
+    import agriopt.data.ceda_client  # noqa: F401
     import agriopt.data.price_data  # noqa: F401
     import agriopt.data.reference  # noqa: F401
     import agriopt.data.yield_data  # noqa: F401
+
+
+def test_crops_list():
+    assert len(CROPS) == 8
+    assert "onion" not in CROPS
+    assert "maize" in CROPS
 
 
 def test_yield_clean_parquet():
@@ -38,9 +51,17 @@ def test_prices_monthly_parquet():
     df = pd.read_parquet(PRICES_MONTHLY_PARQUET)
     assert len(df) > 0
 
-    available_crops = {k for k, v in CROP_NAME_MAP.items() if v["price"] is not None}
-    assert set(df["crop"].unique()).issubset(available_crops)
-    assert set(df["crop"].unique()) == available_crops
+    for crop in CROPS:
+        if crop == "sugarcane":
+            continue  # no mandi series -- FRP admin price instead
+        n_months = df[df["crop"] == crop]["month"].nunique()
+        assert n_months >= MIN_MONTHS, f"{crop}: only {n_months} months (< {MIN_MONTHS})"
+
+
+def test_yield_to_saleable_qtl_per_ha_covers_all_crops():
+    for crop in CROPS:
+        assert crop in YIELD_TO_SALEABLE_QTL_PER_HA, f"missing conversion for {crop}"
+        assert callable(YIELD_TO_SALEABLE_QTL_PER_HA[crop])
 
 
 def test_crop_reference_csv():
@@ -58,6 +79,29 @@ def test_crop_reference_csv():
         "fert_k_kg_ha",
         "fert_source",
         "verified",
+        "admin_price_rs_per_qtl",
+        "admin_price_type",
+        "admin_price_source",
     }
     assert required_cols.issubset(df.columns)
     assert set(df["crop"]) == set(CROPS)
+
+
+def test_ceda_client_never_leaks_api_key_on_failure(monkeypatch):
+    monkeypatch.setattr(ceda_client, "RATE_LIMIT_SECONDS", 0.0)
+    monkeypatch.setattr(ceda_client, "RETRY_BACKOFF_SECONDS", 0.0)
+
+    secret_key = "SUPER_SECRET_TEST_KEY_4f8c2a"
+    client = ceda_client.CedaClient(api_key=secret_key)
+
+    fake_response = MagicMock()
+    fake_response.status_code = 500
+    fake_response.ok = False
+    fake_response.text = "internal server error"
+    monkeypatch.setattr(client._session, "request", MagicMock(return_value=fake_response))
+
+    with pytest.raises(ceda_client.CedaApiError) as excinfo:
+        client.get_commodities()
+
+    message = str(excinfo.value)
+    assert secret_key not in message
