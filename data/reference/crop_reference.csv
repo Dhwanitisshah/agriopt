@@ -1,0 +1,9 @@
+crop,water_mm_min,water_mm_max,water_source,cost_rs_per_ha,cost_source,fert_n_kg_ha,fert_p_kg_ha,fert_k_kg_ha,fert_source,verified
+rice,450,700,"FAO TM3 (paddy, excl. percolation losses)",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+wheat,450,650,"FAO TM3 (listed jointly as Barley/Oats/Wheat)",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+jowar,450,650,"FAO TM3 (listed as Sorghum)",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+soybean,450,700,"FAO TM3",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+cotton,700,1300,"FAO TM3",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+sugarcane,1500,2500,"FAO TM3",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+tur,,,,,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False
+onion,350,550,"FAO TM3",,"TODO: CACP cost of cultivation (Maharashtra)",,,,"TODO: state recommended dose",False

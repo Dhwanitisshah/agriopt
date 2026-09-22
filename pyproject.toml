@@ -1,0 +1,13 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agriopt"
+version = "0.1.0"
+description = "Multi-objective crop planning for Maharashtra (yield + price models -> NSGA-II allocation)"
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
