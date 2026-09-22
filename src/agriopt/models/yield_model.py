@@ -379,16 +379,31 @@ def load_metadata(metadata_path=YIELD_MODEL_METADATA_PATH) -> dict:
 # --- Inference API for the optimizer -----------------------------------------
 
 
-def predict_yield(crop: str, season: str, state: str, year: int, rainfall_mm: float, **optional) -> float:
+def predict_yield(
+    crop: str,
+    season: str,
+    state: str,
+    year: int,
+    rainfall_mm: float,
+    model=None,
+    num_cols: list[str] | None = None,
+    **optional,
+) -> float:
     """Predict yield in DATASET units (t/ha, or bales/ha for cotton -- see
-    docs/units.md) for a single (crop, season, state, year, rainfall) point,
-    using the saved best model. `crop` is the canonical AgriOpt name (e.g.
-    "rice"); it's translated to the dataset's raw crop string internally.
-    `**optional` may supply fertilizer_per_ha/pesticide_per_ha if the saved
-    model's feature set includes them (see metadata["num_cols"])."""
-    model = load_model()
-    metadata = load_metadata()
-    num_cols = metadata["num_cols"]
+    docs/units.md) for a single (crop, season, state, year, rainfall) point.
+    `crop` is the canonical AgriOpt name (e.g. "rice"); it's translated to
+    the dataset's raw crop string internally. `**optional` may supply
+    fertilizer_per_ha/pesticide_per_ha if the model's feature set includes
+    them (see metadata["num_cols"]).
+
+    By default this loads the saved INFERENCE model (models/yield_best.joblib,
+    refit on all years -- see save/refit step in scripts/10_train_yield.py).
+    Pass `model`/`num_cols` explicitly to predict with a different in-memory
+    model (e.g. to compare the eval model vs the refit inference model)."""
+    if model is None:
+        model = load_model()
+    if num_cols is None:
+        num_cols = load_metadata()["num_cols"]
 
     row = {
         "crop": CANON_TO_YIELD_NAME.get(crop, crop),
@@ -409,19 +424,29 @@ def predict_yield(crop: str, season: str, state: str, year: int, rainfall_mm: fl
     return float(pred[0])
 
 
-def _maharashtra_recent_rainfall_median(df: pd.DataFrame, state: str = STATE, n_years: int = 5) -> float:
+def maharashtra_recent_rainfall_median(df: pd.DataFrame, state: str = STATE, n_years: int = 5) -> float:
     mh = df[df["state"] == state][["year", "rainfall_mm"]].drop_duplicates()
     recent = mh.sort_values("year", ascending=False).head(n_years)
     return float(recent["rainfall_mm"].median())
 
 
-def expected_yield_saleable(crop: str, state: str = STATE, year: int | None = None, rainfall_mm: float | None = None) -> dict:
+def expected_yield_saleable(
+    crop: str,
+    state: str = STATE,
+    year: int | None = None,
+    rainfall_mm: float | None = None,
+    model=None,
+    num_cols: list[str] | None = None,
+) -> dict:
     """Quintals of MARKETED product per ha, for the crop's MAIN season in
     `state` (agriopt.config.MAIN_SEASON), via
     agriopt.config.YIELD_TO_SALEABLE_QTL_PER_HA.
 
     Defaults: year = (latest year in the training data) + 1; rainfall_mm =
     `state`'s median rainfall over its last 5 available years.
+
+    Uses the saved INFERENCE model (yield_best, refit on all years) unless
+    `model`/`num_cols` are passed explicitly -- see predict_yield().
     """
     df, _ = load_model_frame()
     season = MAIN_SEASON[crop]
@@ -429,9 +454,9 @@ def expected_yield_saleable(crop: str, state: str = STATE, year: int | None = No
     if year is None:
         year = int(df["year"].max()) + 1
     if rainfall_mm is None:
-        rainfall_mm = _maharashtra_recent_rainfall_median(df, state=state)
+        rainfall_mm = maharashtra_recent_rainfall_median(df, state=state)
 
-    dataset_yield = predict_yield(crop, season, state, year, rainfall_mm)
+    dataset_yield = predict_yield(crop, season, state, year, rainfall_mm, model=model, num_cols=num_cols)
     saleable_qtl_ha = YIELD_TO_SALEABLE_QTL_PER_HA[crop](dataset_yield)
 
     return {

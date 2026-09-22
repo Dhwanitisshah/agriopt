@@ -72,16 +72,18 @@ def test_crop_reference_csv():
         "water_mm_min",
         "water_mm_max",
         "water_source",
-        "cost_rs_per_ha",
+        "cost_rs_per_qtl",
         "cost_source",
+        "msp_rs_per_qtl",
+        "msp_source",
         "fert_n_kg_ha",
         "fert_p_kg_ha",
         "fert_k_kg_ha",
         "fert_source",
-        "verified",
+        "fert_basis",
         "admin_price_rs_per_qtl",
-        "admin_price_type",
-        "admin_price_source",
+        "verified",
+        "notes",
     }
     assert required_cols.issubset(df.columns)
     assert set(df["crop"]) == set(CROPS)

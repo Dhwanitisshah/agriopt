@@ -35,6 +35,13 @@ CROP_REFERENCE_CSV = DATA_REFERENCE / "crop_reference.csv"
 
 YIELD_MODEL_PATH = MODELS_DIR / "yield_best.joblib"
 YIELD_MODEL_METADATA_PATH = MODELS_DIR / "yield_best.json"
+# yield_best is refit on ALL years (1997-2020) for inference; yield_eval is
+# the <=2015 model the Phase 1 metrics were computed on, kept for reference.
+YIELD_EVAL_MODEL_PATH = MODELS_DIR / "yield_eval.joblib"
+YIELD_EVAL_METADATA_PATH = MODELS_DIR / "yield_eval.json"
+
+PRICE_MODEL_PATH = MODELS_DIR / "price_best_h12.joblib"
+PRICE_MODEL_METADATA_PATH = MODELS_DIR / "price_best_h12.json"
 
 ENV_FILE = REPO_ROOT / ".env"
 

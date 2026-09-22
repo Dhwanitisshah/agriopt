@@ -2,7 +2,16 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from agriopt.config import CROPS, STATE, TEST_START_YEAR, TRAIN_END_YEAR, YIELD_MODEL_METADATA_PATH, YIELD_MODEL_PATH
+from agriopt.config import (
+    CROPS,
+    STATE,
+    TEST_START_YEAR,
+    TRAIN_END_YEAR,
+    YIELD_EVAL_METADATA_PATH,
+    YIELD_EVAL_MODEL_PATH,
+    YIELD_MODEL_METADATA_PATH,
+    YIELD_MODEL_PATH,
+)
 from agriopt.models.yield_model import (
     BaselineLast,
     BaselineMean,
@@ -49,6 +58,17 @@ def test_expected_yield_saleable_positive_and_deterministic():
         assert r1["value"] == pytest.approx(r2["value"])
         assert r1["year"] == r2["year"]
         assert r1["rainfall_mm"] == pytest.approx(r2["rainfall_mm"])
+
+
+def test_eval_vs_inference_model_train_max_year():
+    assert YIELD_EVAL_MODEL_PATH.exists()
+    assert YIELD_EVAL_METADATA_PATH.exists()
+
+    inference_meta = load_metadata(YIELD_MODEL_METADATA_PATH)
+    eval_meta = load_metadata(YIELD_EVAL_METADATA_PATH)
+
+    assert inference_meta["train_max_year"] == 2020
+    assert eval_meta["train_max_year"] == TRAIN_END_YEAR == 2015
 
 
 def test_baselines_predict_for_every_maharashtra_test_row():

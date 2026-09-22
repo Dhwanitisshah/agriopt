@@ -23,6 +23,7 @@ import pandas as pd
 import shap
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
+from sklearn.metrics import mean_absolute_error
 
 from agriopt.config import (
     CROPS,
@@ -32,6 +33,8 @@ from agriopt.config import (
     STATE,
     TEST_START_YEAR,
     TRAIN_END_YEAR,
+    YIELD_EVAL_METADATA_PATH,
+    YIELD_EVAL_MODEL_PATH,
     YIELD_TO_SALEABLE_QTL_PER_HA,
 )
 from agriopt.models.yield_model import (
@@ -265,25 +268,54 @@ def main() -> None:
     (REPORTS_RESULTS / "yield_results.md").write_text("".join(md), encoding="utf-8")
     print("Wrote yield_results.csv / yield_results.md")
 
-    # best model overall (all-India test MAE), and best ML model (Ridge/RF/XGB
-    # only -- ablation/regional-generalization retrain feature sets, which
-    # only makes sense for the numeric-feature models, not the baselines).
-    # Selection metric is MAHARASHTRA test MAE, not all-India: all-India MAE
-    # is dominated by scale effects from huge-magnitude, non-target crops
-    # (e.g. Coconut yield up to ~5000 t/ha) that have nothing to do with the
-    # optimizer's actual use case, which only ever queries Maharashtra.
-    # (All-India MAE is still reported in the table -- just not used to pick.)
-    best_overall_name = results_df["maharashtra_MAE"].idxmin()
+    # --- Model family selection: VALIDATION Maharashtra MAE, NOT test --------
+    # Selecting the winning model FAMILY on the test set would leak test
+    # information into a modeling decision (the classic train/select/evaluate
+    # conflation). Instead, refit each of the 5 families on tune_fit (<2013)
+    # and pick by MAE on tune_valid's Maharashtra rows (2013-2015) -- the same
+    # window RF/XGB hyperparameters were already tuned on, just now used to
+    # choose AMONG families too. The test table above is unaffected/unchanged;
+    # it's still computed for every model on the full <=2015-trained versions.
     ml_names = ["Ridge", "RandomForest", "XGBoost"]
-    best_ml_name = results_df.loc[ml_names, "maharashtra_MAE"].idxmin()
-    print(f"Best overall ({STATE} MAE): {best_overall_name}. Best ML model: {best_ml_name}.")
+    val_mh = tune_valid[tune_valid["state"] == STATE]
+    print(f"\nSelecting best model family on VALIDATION {STATE} MAE "
+          f"({len(val_mh)} rows, 2013-2015; fit on {len(tune_fit)} rows < 2013) -- not test.")
+    val_models = {
+        "Baseline-Mean": BaselineMean().fit(tune_fit),
+        "Baseline-Last": BaselineLast().fit(tune_fit),
+        "Ridge": SklearnYieldModel("Ridge", Ridge(alpha=1.0, random_state=RANDOM_SEED), num_cols).fit(tune_fit),
+        "RandomForest": SklearnYieldModel(
+            "RandomForest", RandomForestRegressor(random_state=RANDOM_SEED, n_jobs=-1, **rf_best_params), num_cols
+        ).fit(tune_fit),
+        "XGBoost": XgbYieldModel("XGBoost", num_cols, **xgb_best_params).fit(tune_fit),
+    }
+    val_mae = {name: float(mean_absolute_error(val_mh["yield"], m.predict(val_mh))) for name, m in val_models.items()}
+    for name, mae in sorted(val_mae.items(), key=lambda kv: kv[1]):
+        print(f"  {name:15s} validation {STATE} MAE = {mae:.4f}")
+
+    best_overall_name = min(val_mae, key=val_mae.get)
+    best_ml_name = min((k for k in val_mae if k in ml_names), key=lambda k: val_mae[k])
+    test_would_have_picked = results_df["maharashtra_MAE"].idxmin()
+    selection_changed = best_overall_name != test_would_have_picked
+    print(f"Best overall (VALIDATION {STATE} MAE): {best_overall_name}. Best ML model: {best_ml_name}.")
+    if selection_changed:
+        print(f"  NOTE: differs from what TEST-based selection would have picked ({test_would_have_picked}).")
+
+    def build_model_by_name(name: str, nc: list[str]):
+        if name == "Baseline-Mean":
+            return BaselineMean()
+        if name == "Baseline-Last":
+            return BaselineLast()
+        if name == "Ridge":
+            return SklearnYieldModel("Ridge", Ridge(alpha=1.0, random_state=RANDOM_SEED), nc)
+        if name == "RandomForest":
+            return SklearnYieldModel("RandomForest", RandomForestRegressor(random_state=RANDOM_SEED, n_jobs=-1, **rf_best_params), nc)
+        if name == "XGBoost":
+            return XgbYieldModel("XGBoost", nc, **xgb_best_params)
+        raise ValueError(name)
 
     def build_best_ml(nc: list[str]):
-        if best_ml_name == "Ridge":
-            return SklearnYieldModel("Ridge", Ridge(alpha=1.0, random_state=RANDOM_SEED), nc)
-        if best_ml_name == "RandomForest":
-            return SklearnYieldModel("RandomForest", RandomForestRegressor(random_state=RANDOM_SEED, n_jobs=-1, **rf_best_params), nc)
-        return XgbYieldModel("XGBoost", nc, **xgb_best_params)
+        return build_model_by_name(best_ml_name, nc)
 
     # --- E1.2: ablation --------------------------------------------------------
     print("\nRunning ablation ...")
@@ -369,36 +401,57 @@ def main() -> None:
     plt.close("all")
 
     # --- Findings write-up -------------------------------------------------
-    write_findings(results, results_df, ablation_df, regional_df, best_overall_name, best_ml_name, include_fert_pest)
+    write_findings(
+        results, results_df, ablation_df, regional_df, best_overall_name, best_ml_name, include_fert_pest,
+        val_mae=val_mae, test_would_have_picked=test_would_have_picked, selection_changed=selection_changed,
+    )
 
-    # --- Save best-overall model for the inference API -------------------------
-    metadata = {
+    # --- Save the EVAL model (<=2015, what the metrics above were computed on) --
+    eval_model = models[best_overall_name]
+    eval_metadata = {
         "model_name": best_overall_name,
         "cat_cols": CAT_COLS,
         "num_cols": num_cols,
         "train_years": f"<= {TRAIN_END_YEAR}",
+        "train_max_year": TRAIN_END_YEAR,
         "test_years": f">= {TEST_START_YEAR}",
         "metrics_all_india": results[best_overall_name]["all_india"],
         "metrics_maharashtra": results[best_overall_name]["maharashtra"],
         "fert_pest_included": include_fert_pest,
         "random_seed": RANDOM_SEED,
+        "selected_on": "validation (2013-2015, fit <2013)",
     }
-    save_model(best_model, metadata)
-    print(f"\nSaved best model ({best_overall_name}) to models/yield_best.joblib / .json")
+    save_model(eval_model, eval_metadata, model_path=YIELD_EVAL_MODEL_PATH, metadata_path=YIELD_EVAL_METADATA_PATH)
+    print(f"\nSaved eval model ({best_overall_name}, train <= {TRAIN_END_YEAR}) to models/yield_eval.joblib / .json")
 
-    # --- Sanity table: expected_yield_saleable for all 8 crops -------------------
-    print("\nExpected saleable yield sanity table:")
-    print(f"{'crop':10s} {'season':12s} {'year':6s} {'dataset_yield':14s} {'saleable_qtl_ha':17s} flag")
+    # --- Refit the SAME model family+hyperparams on ALL years for inference -----
+    all_years_max = int(df["year"].max())
+    inference_model = build_model_by_name(best_overall_name, num_cols).fit(df)
+    inference_metadata = dict(eval_metadata)
+    inference_metadata["train_years"] = f"<= {all_years_max} (all available years)"
+    inference_metadata["train_max_year"] = all_years_max
+    inference_metadata.pop("test_years", None)
+    inference_metadata["note"] = "Refit on all years for inference; metrics above are from the <=2015 eval model, not this one."
+    save_model(inference_model, inference_metadata)
+    print(f"Saved inference model ({best_overall_name}, train <= {all_years_max}) to models/yield_best.joblib / .json")
+
+    # --- Sanity table: expected_yield_saleable, EVAL model vs INFERENCE model ---
+    print("\nExpected saleable yield sanity table (eval <=2015 model vs inference all-years model):")
+    print(f"{'crop':10s} {'season':12s} {'year':6s} {'old(eval) qtl/ha':18s} {'new(inference) qtl/ha':22s} flag")
     for crop in CROPS:
-        r = expected_yield_saleable(crop)
+        r_old = expected_yield_saleable(crop, model=eval_model, num_cols=num_cols)
+        r_new = expected_yield_saleable(crop, model=inference_model, num_cols=num_cols)
         low, high = PLAUSIBLE_SALEABLE_RANGES.get(crop, (None, None))
         flag = ""
-        if low is not None and not (low <= r["value"] <= high):
+        if low is not None and not (low <= r_new["value"] <= high):
             flag = f"OUT OF RANGE [{low},{high}]"
-        print(f"{crop:10s} {r['season']:12s} {r['year']:<6d} {r['dataset_yield']:<14.3f} {r['value']:<17.2f} {flag}")
+        print(f"{crop:10s} {r_new['season']:12s} {r_new['year']:<6d} {r_old['value']:<18.2f} {r_new['value']:<22.2f} {flag}")
 
 
-def write_findings(results, results_df, ablation_df, regional_df, best_overall_name, best_ml_name, include_fert_pest) -> None:
+def write_findings(
+    results, results_df, ablation_df, regional_df, best_overall_name, best_ml_name, include_fert_pest,
+    val_mae, test_would_have_picked, selection_changed,
+) -> None:
     all_india_winner = results_df["all_india_MAE"].idxmin()
     baseline_beats_ml_mh = results_df.loc[["Baseline-Mean", "Baseline-Last"], "maharashtra_MAE"].min() < results_df.loc[
         ["Ridge", "RandomForest", "XGBoost"], "maharashtra_MAE"
@@ -411,24 +464,45 @@ def write_findings(results, results_df, ablation_df, regional_df, best_overall_n
     reg_included = regional_df.loc[f"{best_ml_name} (Maharashtra included)", "maharashtra_MAE"]
     reg_excluded = regional_df.loc[f"{best_ml_name} (Maharashtra excluded)", "maharashtra_MAE"]
 
-    lines = ["# Yield model findings (Phase 1)\n\n"]
+    lines = ["# Yield model findings (Phase 1 / Phase 2 fix)\n\n"]
     lines.append(
-        f"- Best model, selected by **{STATE} test MAE** (the optimizer only ever queries {STATE}, "
-        "so this -- not all-India MAE -- is the operative selection metric): "
-        f"**{best_overall_name}** ({STATE} MAE={results_df.loc[best_overall_name, 'maharashtra_MAE']:.3f}, "
-        f"R2={results_df.loc[best_overall_name, 'maharashtra_R2']:.3f}; all-India MAE="
-        f"{results_df.loc[best_overall_name, 'all_india_MAE']:.3f}).\n"
+        "- **Model selected on validation, not test.** Best model family chosen by "
+        f"{STATE} MAE on the validation window (fit <2013, evaluate 2013-2015): "
+        f"**{best_overall_name}** (validation {STATE} MAE="
+        f"{val_mae[best_overall_name]:.4f}; next best: "
+        f"{', '.join(f'{k}={v:.4f}' for k, v in sorted(val_mae.items(), key=lambda kv: kv[1]) if k != best_overall_name)}).\n"
+    )
+    if selection_changed:
+        lines.append(
+            f"- **The winner changed vs test-based selection**: picking by test-set {STATE} MAE instead "
+            f"would have chosen **{test_would_have_picked}** (test {STATE} MAE="
+            f"{results_df.loc[test_would_have_picked, 'maharashtra_MAE']:.3f}) instead of "
+            f"**{best_overall_name}** (test {STATE} MAE={results_df.loc[best_overall_name, 'maharashtra_MAE']:.3f}). "
+            "Validation-based selection is used for the actual deployed model to avoid fitting the "
+            "selection decision to the test set.\n"
+        )
+    else:
+        lines.append(
+            f"- Validation-based selection agrees with what test-based selection would have picked "
+            f"({best_overall_name}) -- the fix changes the *methodology* (no more test-set leakage into "
+            "model selection) without changing the outcome here.\n"
+        )
+    lines.append(
+        f"- Test-set metrics reported below are for **{best_overall_name}** "
+        f"({STATE} test MAE={results_df.loc[best_overall_name, 'maharashtra_MAE']:.3f}, "
+        f"R2={results_df.loc[best_overall_name, 'maharashtra_R2']:.3f}; all-India test MAE="
+        f"{results_df.loc[best_overall_name, 'all_india_MAE']:.3f}) -- computed purely for reporting, "
+        "played no role in selecting it.\n"
     )
     if all_india_winner != best_overall_name:
         lines.append(
-            f"- **All-India MAE picks a different winner ({all_india_winner}) than {STATE} MAE "
-            f"({best_overall_name})** -- all-India MAE is dominated by scale effects from huge-magnitude, "
-            "non-target crops (e.g. Coconut yield up to ~5000 t/ha), so a model can win on that metric "
-            "while doing poorly for our actual crops/region. Case in point: "
+            f"- All-India test MAE would have picked a different model ({all_india_winner}) than "
+            f"{STATE} MAE ({best_overall_name}) -- all-India MAE is dominated by scale effects from "
+            "huge-magnitude, non-target crops (e.g. Coconut yield up to ~5000 t/ha), so a model can win "
+            "on that metric while doing poorly for our actual crops/region. Case in point: "
             f"{all_india_winner}'s {STATE} R2 is {results_df.loc[all_india_winner, 'maharashtra_R2']:.3f} "
             f"(worse than predicting the mean, if negative), vs {best_overall_name}'s "
-            f"{results_df.loc[best_overall_name, 'maharashtra_R2']:.3f}. This is why selection uses "
-            f"{STATE} MAE, not all-India MAE.\n"
+            f"{results_df.loc[best_overall_name, 'maharashtra_R2']:.3f}.\n"
         )
     lines.append(
         f"- {'A baseline (Baseline-Mean/Baseline-Last) beats every ML model on ' + STATE + ' MAE' if baseline_beats_ml_mh else 'Every ML model (Ridge/RandomForest/XGBoost) beats both baselines on ' + STATE + ' MAE'} "
