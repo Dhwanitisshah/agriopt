@@ -1,3 +1,17 @@
+import os
+
+# Demo-hardening Item 1: cap native (BLAS/OpenMP/numba) thread pools to 1
+# BEFORE numpy/pymoo/sklearn are imported (directly or transitively, e.g.
+# via pandas/agriopt below). Left at their defaults, these libraries each
+# spin up their own OS-level thread pool; under Streamlit's own script-run
+# thread on Windows, repeated NSGA-II/NSGA-III runs across reruns were
+# observed to destabilize those thread pools (intermittent native crashes/
+# hangs deep in numpy/pymoo, unrelated to this app's own logic -- see
+# scripts/stress_app.py and tests/test_app_smoke.py for how this was
+# root-caused). setdefault() so an operator's own env still wins.
+for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "1")
+
 import sys
 from pathlib import Path
 
@@ -62,7 +76,36 @@ R = appdata.revenue_vector_from_cache(cache_raw)
 if "scenario_result" not in st.session_state:
     st.session_state["scenario_result"] = None
 
-if sidebar_inputs.run_clicked or st.session_state["scenario_result"] is None:
+# Demo-hardening Item 4: if the current inputs exactly match a farmer-profile
+# preset at default settings, show scripts/40_build_cache.py's precomputed
+# result instantly instead of re-running NSGA-II/NSGA-III -- checked on
+# every rerun (not just Run clicks), so it applies right after a preset
+# button fills the sidebar, before the user even presses Run.
+sugarcane_default_frp = float(params_market.loc["sugarcane", "price"]) if "sugarcane" in params_market.index else 0.0
+matched_preset = appdata.match_preset(
+    scenario,
+    sidebar_inputs.priority,
+    sidebar_inputs.risk_aware,
+    sidebar_inputs.risk_aversion,
+    sidebar_inputs.sugarcane_risk_mode,
+    sidebar_inputs.price_multipliers,
+    sidebar_inputs.sugarcane_frp_override,
+    sugarcane_default_frp,
+    params_market,
+)
+
+if matched_preset is not None:
+    mode_key = "risk_aware" if sidebar_inputs.risk_aware else "normal"
+    cached_result = cache_raw["preset_results"][matched_preset][mode_key]
+    st.session_state["scenario_result"] = appdata.scenario_result_from_cache(
+        cached_result,
+        scenario,
+        weights,
+        sidebar_inputs.weights4,
+        sidebar_inputs.risk_aware,
+        risk_inputs.Sigma if sidebar_inputs.risk_aware else None,
+    )
+elif sidebar_inputs.run_clicked or st.session_state["scenario_result"] is None:
     with st.spinner("Running optimizer..."):
         st.session_state["scenario_result"] = run_pipeline(
             params_df,
@@ -74,6 +117,12 @@ if sidebar_inputs.run_clicked or st.session_state["scenario_result"] is None:
         )
 
 result = st.session_state["scenario_result"]
+
+if result.feasible and result.risk_aware_failed:
+    st.warning("Risk-aware optimisation failed; showing the standard 3-objective plan.")
+
+if result.feasible and result.from_cache:
+    st.caption(":material/bolt: cached result for this farmer profile -- shown instantly, not re-optimized.")
 
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     ["Recommendation", "Trade-offs", "Strategy comparison", "Risk", "Model inputs & evidence", "About & limitations"]

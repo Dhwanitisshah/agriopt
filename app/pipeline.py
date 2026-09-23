@@ -135,6 +135,8 @@ class ScenarioResult:
     risk_aware: bool = False
     weights4: tuple[float, float, float, float] | None = None
     Sigma: np.ndarray | None = None
+    risk_aware_failed: bool = False
+    from_cache: bool = False
 
 
 def run_pipeline(
@@ -175,11 +177,25 @@ def run_pipeline(
     r4a = evaluate(x4a, params_df, scenario) if x4a is not None else None
 
     x_rec, r_rec, runtime_total = x4a, r4a, runtime_a
+    risk_aware_failed = False
     if risk_aware and Sigma is not None:
-        x4b, _, _, runtime_b = nsga3_recommended(params_df, scenario, Sigma, weights=weights4 or (0.4, 0.2, 0.1, 0.3), gens=NSGA3_GENS, seed=seed)
+        try:
+            x4b, _, _, runtime_b = nsga3_recommended(params_df, scenario, Sigma, weights=weights4 or (0.4, 0.2, 0.1, 0.3), gens=NSGA3_GENS, seed=seed)
+        except Exception:
+            # Never let a risk-aware (NSGA-III) failure surface as a
+            # traceback/blank page -- fall back to the Model A (NSGA-II)
+            # result that was already computed above, and let the caller
+            # (the app) show a plain warning via result.risk_aware_failed.
+            x4b, runtime_b = None, 0.0
+            risk_aware_failed = True
+
         runtime_total = runtime_a + runtime_b
         if x4b is not None:
             x_rec, r_rec = x4b, evaluate(x4b, params_df, scenario)
+        elif not risk_aware_failed:
+            # NSGA-III ran without raising but returned no feasible
+            # solution (empty front) -- same user-facing fallback.
+            risk_aware_failed = True
 
     if x_rec is None:
         return ScenarioResult(
@@ -202,6 +218,7 @@ def run_pipeline(
         risk_aware=risk_aware,
         weights4=weights4,
         Sigma=Sigma if risk_aware else None,
+        risk_aware_failed=risk_aware_failed,
     )
 
 

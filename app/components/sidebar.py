@@ -11,22 +11,23 @@ import streamlit as st
 from agriopt.config import CROPS
 from agriopt.optim.problem import Scenario
 from app.pipeline import current_mix_water, weights4_from_priority_and_risk_aversion, weights_from_priority
-
-PRESETS = {
-    "Small rainfed (2 ha, tight water)": {"land_ha": 2, "water_mult": 0.7},
-    "Medium mixed (5 ha, current water)": {"land_ha": 5, "water_mult": 1.0},
-    "Large irrigated (15 ha, relaxed water)": {"land_ha": 15, "water_mult": 1.3},
-    "Drought year (current land, water x0.6)": {"land_ha": None, "water_mult": 0.6},
-}
+from app.presets import (
+    DEFAULT_FOOD_SHARE_MIN,
+    DEFAULT_LAND_HA,
+    DEFAULT_MAX_SHARE,
+    DEFAULT_PRIORITY,
+    DEFAULT_RISK_AVERSION,
+    PRESETS,
+)
 
 DEFAULTS = {
-    "land_ha": 10,
-    "food_share_min": 0.3,
-    "max_share": 0.5,
+    "land_ha": int(DEFAULT_LAND_HA),
+    "food_share_min": DEFAULT_FOOD_SHARE_MIN,
+    "max_share": DEFAULT_MAX_SHARE,
     "price_mode_label": "Market (last observed)",
-    "priority": 0.5,
+    "priority": DEFAULT_PRIORITY,
     "risk_aware_mode": False,
-    "risk_aversion": 0.5,
+    "risk_aversion": DEFAULT_RISK_AVERSION,
     "sugarcane_risk_mode_label": "Typical crop risk (conservative)",
 }
 
@@ -38,6 +39,8 @@ class SidebarInputs:
     weights4: tuple[float, float, float, float] | None
     risk_aware: bool
     sugarcane_risk_mode: str
+    priority: float
+    risk_aversion: float
     price_multipliers: dict = field(default_factory=dict)
     sugarcane_frp_override: float | None = None
     run_clicked: bool = False
@@ -105,6 +108,7 @@ def render_sidebar(params_df_for_water_ref: pd.DataFrame) -> SidebarInputs:
         )
         weights4 = None
         sugarcane_risk_mode = "conservative"
+        risk_aversion = DEFAULT_RISK_AVERSION
         if risk_aware:
             risk_aversion = st.slider(
                 "Risk aversion",
@@ -165,6 +169,8 @@ def render_sidebar(params_df_for_water_ref: pd.DataFrame) -> SidebarInputs:
         weights4=weights4,
         risk_aware=risk_aware,
         sugarcane_risk_mode=sugarcane_risk_mode,
+        priority=priority,
+        risk_aversion=risk_aversion,
         price_multipliers=price_multipliers,
         sugarcane_frp_override=sugarcane_frp_override,
         run_clicked=run_clicked,

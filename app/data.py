@@ -76,3 +76,94 @@ def revenue_vector_from_cache(raw: dict) -> np.ndarray:
     crop order as risk_inputs_from_cache -- precomputed alongside Sigma
     since Sigma = correlation x outer(R, R)."""
     return np.array(raw["risk"]["R"], dtype=float)
+
+
+def match_preset(
+    scenario,
+    priority: float,
+    risk_aware: bool,
+    risk_aversion: float,
+    sugarcane_mode: str,
+    price_multipliers: dict,
+    sugarcane_frp_override: float,
+    sugarcane_default_frp: float,
+    params_df_for_water_ref: pd.DataFrame,
+) -> str | None:
+    """Demo-hardening Item 4: returns the matching preset name if every
+    current sidebar input exactly equals that preset's values at the app's
+    default settings (scripts/40_build_cache.py precomputed exactly these
+    combinations), else None. Any active what-if price shock, or any
+    non-default constraint/priority/risk setting, disqualifies a cache hit
+    -- those combinations were never precomputed, so falling through to a
+    live run is correct, not a bug."""
+    from app.pipeline import current_mix_water
+    from app.presets import (
+        DEFAULT_FOOD_SHARE_MIN,
+        DEFAULT_LAND_HA,
+        DEFAULT_MAX_SHARE,
+        DEFAULT_PRICE_MODE,
+        DEFAULT_PRIORITY,
+        DEFAULT_RISK_AVERSION,
+        DEFAULT_SUGARCANE_RISK_MODE,
+        PRESETS,
+    )
+
+    if scenario.food_share_min != DEFAULT_FOOD_SHARE_MIN or scenario.max_share != DEFAULT_MAX_SHARE:
+        return None
+    if scenario.price_mode != DEFAULT_PRICE_MODE:
+        return None
+    if abs(priority - DEFAULT_PRIORITY) > 1e-9:
+        return None
+    if any(m != 1.0 for m in price_multipliers.values()):
+        return None
+    if abs(sugarcane_frp_override - sugarcane_default_frp) > 1e-6:
+        return None
+    if risk_aware and (abs(risk_aversion - DEFAULT_RISK_AVERSION) > 1e-9 or sugarcane_mode != DEFAULT_SUGARCANE_RISK_MODE):
+        return None
+
+    for name, preset in PRESETS.items():
+        land_ha = float(preset["land_ha"]) if preset["land_ha"] is not None else DEFAULT_LAND_HA
+        if abs(scenario.land_ha - land_ha) > 1e-6:
+            continue
+        expected_water = preset["water_mult"] * current_mix_water(params_df_for_water_ref, land_ha)
+        if abs(scenario.water_budget_m3 - expected_water) <= max(1.0, expected_water * 1e-6):
+            return name
+    return None
+
+
+def scenario_result_from_cache(
+    cached: dict,
+    scenario,
+    weights: tuple,
+    weights4: tuple | None,
+    risk_aware: bool,
+    Sigma: np.ndarray | None,
+):
+    """Reconstructs an app.pipeline.ScenarioResult from a cached preset
+    result (scripts/40_build_cache.py's "preset_results" block)."""
+    from app.pipeline import ScenarioResult
+
+    if not cached["feasible"]:
+        return ScenarioResult(feasible=False, message=cached.get("message"), scenario=scenario, weights=weights)
+
+    x = {k: np.array(v, dtype=float) for k, v in cached["x"].items()}
+    n_crops = len(next(iter(x.values())))
+    X_front = np.array(cached["X_front"], dtype=float) if cached["X_front"] else np.empty((0, n_crops))
+    F_front = np.array(cached["F_front"], dtype=float) if cached["F_front"] else np.empty((0, 3))
+
+    return ScenarioResult(
+        feasible=True,
+        message=None,
+        scenario=scenario,
+        weights=weights,
+        x=x,
+        evals=cached["evals"],
+        X_front=X_front,
+        F_front=F_front,
+        nsga_runtime=cached.get("nsga_runtime"),
+        risk_aware=risk_aware,
+        weights4=weights4,
+        Sigma=Sigma if risk_aware else None,
+        risk_aware_failed=cached.get("risk_aware_failed", False),
+        from_cache=True,
+    )

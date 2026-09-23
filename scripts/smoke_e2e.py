@@ -4,6 +4,14 @@ No Streamlit involved. Exit code 0 on success, 1 on failure.
 """
 from __future__ import annotations
 
+import os
+
+# Demo-hardening Item 1: see app/streamlit_app.py's matching block for why --
+# must be set before numpy/pymoo/sklearn are imported (directly or via
+# agriopt below).
+for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "1")
+
 import sys
 from pathlib import Path
 
