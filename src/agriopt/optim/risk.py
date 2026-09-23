@@ -109,8 +109,17 @@ def build_revenue_series(crop: str, wide: pd.DataFrame, state: str = STATE) -> p
 
 
 def detrend_relative_deviation(revenue: pd.Series) -> tuple[pd.Series, dict]:
-    """OLS-detrend log(revenue) vs year; relative deviation d_t = exp(resid_t) - 1.
-    Returns (deviation_series, {"slope":..., "intercept":..., "n":...})."""
+    """OLS-detrend log(revenue) vs year; relative deviation d_t = exp(resid_t) - 1,
+    then RECENTERED so E[d]=0 exactly.
+
+    OLS guarantees E[resid]=0, but d_t = exp(resid_t) - 1 is a nonlinear
+    (convex) transform of resid_t, so E[d] is slightly POSITIVE by Jensen's
+    inequality even though E[resid]=0 -- left uncorrected, this biases
+    scenario/bootstrap mean profit above the deterministic point-estimate
+    profit (R_i * x_i - cost_i), since profit = base + draws @ (x*R) and
+    E[draws] != 0. Subtracting the (small) sample mean of d removes that
+    bias so E[d_i]=0 exactly and scenario-mean profit reconciles with the
+    deterministic profit (see Phase 5.1 fix + tests/test_risk.py)."""
     revenue = revenue.dropna()
     if len(revenue) < 3:
         return pd.Series(dtype=float), {"slope": float("nan"), "intercept": float("nan"), "n": len(revenue)}
@@ -120,7 +129,8 @@ def detrend_relative_deviation(revenue: pd.Series) -> tuple[pd.Series, dict]:
     slope, intercept = np.polyfit(years, log_rev, deg=1)
     fitted = slope * years + intercept
     resid = log_rev - fitted
-    deviation = pd.Series(np.expm1(resid), index=revenue.index)
+    raw_deviation = np.expm1(resid)
+    deviation = pd.Series(raw_deviation - raw_deviation.mean(), index=revenue.index)
     return deviation, {"slope": float(slope), "intercept": float(intercept), "n": len(revenue)}
 
 
@@ -201,7 +211,86 @@ def portfolio_risk_vectorized(X: np.ndarray, Sigma: np.ndarray) -> np.ndarray:
     return np.sqrt(np.clip(var, 0.0, None))
 
 
-def bootstrap_profit(
+def _active_profit_series(x: np.ndarray, risk_inputs: RiskInputs, R: np.ndarray, cost: np.ndarray):
+    """Shared setup for historical_scenarios/bootstrap_profit_resampled:
+    restrict to crops with x_i>0 and years where ALL of those crops have
+    deviation data (pairwise-complete-within-the-allocation). Returns
+    (x_active, R_active, base, sub) where `sub` is the deviation sub-frame
+    (years x active crops, index = year).
+
+    `sub`'s columns are RE-CENTERED to exactly zero mean over just this
+    subset of years. Each crop's deviation series is already mean-zero over
+    its OWN full year range (detrend_relative_deviation), but intersecting
+    several crops' availability windows (dropna how="any") selects a
+    smaller common subset of years whose empirical mean need not be exactly
+    zero (sampling noise over ~18-19 points) -- left uncorrected this drifts
+    scenario-mean profit away from the deterministic point estimate by more
+    than the ~2% the Phase 5.1 fix requires. Re-centering at the subset
+    actually used keeps mean(profit_t) == deterministic profit by
+    construction, which is what "deviation around the current expected
+    value" should mean for whatever years are actually being evaluated."""
+    x = np.asarray(x, dtype=float)
+    active = x > 1e-9
+    if not active.any():
+        return None
+    cols = [c for c, a in zip(risk_inputs.crops, active) if a]
+    sub = risk_inputs.deviation_matrix[cols].dropna(how="any")
+    sub = sub - sub.mean()
+    x_active = x[active]
+    R_active = R[active]
+    cost_active = cost[active]
+    base = float(x_active @ (R_active - cost_active))
+    return x_active, R_active, base, sub
+
+
+def historical_scenarios(
+    x: np.ndarray,
+    risk_inputs: RiskInputs,
+    R: np.ndarray,
+    cost: np.ndarray,
+    return_series: bool = False,
+) -> dict:
+    """PRIMARY scenario-risk metric (Phase 5.1): evaluate profit under EACH
+    historical year's ACTUAL (centered) deviations -- no resampling. There
+    are only ~19 discrete historical years available, so a smooth bootstrap
+    distribution manufactures outcomes that were never observed; this
+    reports the real discrete set instead.
+
+    profit_t = sum_i x_i * (R_i * (1 + d_i,t) - cost_i)  for each historical year t
+    (restricted to crops with x_i>0 and years where all of them have data).
+
+    Returns {"n_years", "mean", "worst_year_profit", "worst_year", "P10",
+    "n_loss_years"}. `mean` should be within ~2% of the deterministic
+    profit x@(R-cost) for any x, now that deviations are mean-centered (see
+    detrend_relative_deviation) -- checked in tests/test_risk.py. If fewer
+    than 3 overlapping years are available, returns NaNs (documented, not
+    raised).
+    """
+    setup = _active_profit_series(x, risk_inputs, R, cost)
+    if setup is None:
+        empty = {"n_years": 0, "mean": 0.0, "worst_year_profit": 0.0, "worst_year": None, "P10": 0.0, "n_loss_years": 0}
+        return (empty, pd.Series(dtype=float)) if return_series else empty
+
+    x_active, R_active, base, sub = setup
+    if len(sub) < 3:
+        nan_result = {"n_years": len(sub), "mean": float("nan"), "worst_year_profit": float("nan"), "worst_year": None, "P10": float("nan"), "n_loss_years": 0}
+        return (nan_result, pd.Series(dtype=float)) if return_series else nan_result
+
+    profits = pd.Series(base + sub.to_numpy(dtype=float) @ (x_active * R_active), index=sub.index)
+    worst_year = int(profits.idxmin())
+
+    result = {
+        "n_years": len(profits),
+        "mean": float(profits.mean()),
+        "worst_year_profit": float(profits.min()),
+        "worst_year": worst_year,
+        "P10": float(np.percentile(profits.to_numpy(), 10)),
+        "n_loss_years": int((profits < 0).sum()),
+    }
+    return (result, profits) if return_series else result
+
+
+def bootstrap_profit_resampled(
     x: np.ndarray,
     risk_inputs: RiskInputs,
     R: np.ndarray,
@@ -210,38 +299,26 @@ def bootstrap_profit(
     seed: int = 42,
     return_samples: bool = False,
 ) -> dict:
-    """Resample YEARS (preserving cross-crop correlation) from the deviation
-    matrix restricted to crops with x_i > 0 and years where ALL of those
-    crops have data (pairwise-complete-within-the-allocation), then compute
-    the resulting profit distribution.
-
-    profit = sum_i x_i * (R_i * (1 + d_i) - cost_i)
-
-    Returns {"mean", "P5", "P_loss", "CVaR5", "n_years_used"}. If fewer than
-    3 overlapping years are available for the active crops, returns NaNs
-    (documented, not raised) rather than a bootstrap on almost no data.
-    """
-    x = np.asarray(x, dtype=float)
-    active = x > 1e-9
-    if not active.any():
+    """OPTIONAL, exploratory only -- NOT the primary risk-reporting metric
+    (use historical_scenarios for that). Resamples YEARS WITH REPLACEMENT
+    (bootstrap) from the deviation matrix, which manufactures profit
+    outcomes that were never actually observed since only ~19 discrete
+    historical years exist; kept only for smoothing a distribution shape
+    for exploratory plots, never for headline mean/P5/loss-probability
+    figures (see Phase 5.1 fix)."""
+    setup = _active_profit_series(x, risk_inputs, R, cost)
+    if setup is None:
         empty = {"mean": 0.0, "P5": 0.0, "P_loss": 0.0, "CVaR5": 0.0, "n_years_used": 0}
         return (empty, np.zeros(n)) if return_samples else empty
 
-    cols = [c for c, a in zip(risk_inputs.crops, active) if a]
-    sub = risk_inputs.deviation_matrix[cols].dropna(how="any")
-
+    x_active, R_active, base, sub = setup
     if len(sub) < 3:
         nan_result = {"mean": float("nan"), "P5": float("nan"), "P_loss": float("nan"), "CVaR5": float("nan"), "n_years_used": len(sub)}
         return (nan_result, np.full(n, np.nan)) if return_samples else nan_result
 
-    x_active = x[active]
-    R_active = R[active]
-    cost_active = cost[active]
-    base = float(x_active @ (R_active - cost_active))
-
     rng = np.random.default_rng(seed)
     idx = rng.integers(0, len(sub), size=n)
-    draws = sub.to_numpy(dtype=float)[idx]  # n x len(cols)
+    draws = sub.to_numpy(dtype=float)[idx]  # n x len(active cols)
     profits = base + draws @ (x_active * R_active)
 
     p5 = float(np.percentile(profits, 5))
@@ -255,3 +332,30 @@ def bootstrap_profit(
         "n_years_used": len(sub),
     }
     return (result, profits) if return_samples else result
+
+
+def sigma_with_overridden_std(risk_inputs: RiskInputs, R: np.ndarray, overrides: dict[str, float]) -> tuple[np.ndarray, float]:
+    """Sensitivity-analysis helper (Phase 5.1, Item 5): rebuild Sigma with
+    specific crops' relative-deviation STD overridden while keeping the
+    correlation structure unchanged. E.g. used to test how much
+    sugarcane's low measured risk (an artifact of its constant FRP price,
+    not genuinely lower agronomic risk -- see risk_matrix.md) actually
+    drives the risk-aware recommendation, by substituting a more typical
+    std for it. Returns (Sigma_psd, min_eigenvalue_before_clipping)."""
+    crops = risk_inputs.crops
+    dev_cov = risk_inputs.deviation_matrix.cov().reindex(index=crops, columns=crops).to_numpy(dtype=float)
+    dev_cov = np.nan_to_num(dev_cov, nan=0.0)
+    std = np.sqrt(np.clip(np.diag(dev_cov), 0.0, None))
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        corr = dev_cov / np.outer(std, std)
+    corr = np.nan_to_num(corr, nan=0.0)
+    np.fill_diagonal(corr, 1.0)
+
+    new_std = std.copy()
+    for crop, val in overrides.items():
+        new_std[crops.index(crop)] = val
+
+    new_dev_cov = corr * np.outer(new_std, new_std)
+    Sigma_raw = new_dev_cov * np.outer(R, R)
+    return nearest_psd(Sigma_raw)

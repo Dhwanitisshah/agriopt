@@ -8,9 +8,9 @@ v1 (`exact_front_lp`, Phase 3) sweeps ONE lexicographic profit>water>fert curve 
 |---|---|---|---|---|---|---|---|
 | tight | market | 0.625 | 0.610 | 0.006 | 0.101 | 0.042 | 300 |
 | tight | msp_floor | 0.556 | 0.568 | 0.001 | 0.009 | 0.001 | 289 |
-| current | market | 0.600 | 0.599 | 0.004 | 0.096 | 0.052 | 300 |
+| current | market | 0.600 | 0.599 | 0.004 | 0.094 | 0.051 | 289 |
 | current | msp_floor | 0.547 | 0.558 | 0.001 | 0.009 | 0.001 | 289 |
-| relaxed | market | 0.588 | 0.586 | 0.005 | 0.099 | 0.036 | 289 |
+| relaxed | market | 0.588 | 0.586 | 0.005 | 0.100 | 0.037 | 300 |
 | relaxed | msp_floor | 0.548 | 0.559 | 0.001 | 0.008 | 0.001 | 289 |
 
 ## v1 vs v2: NSGA-II hypervolume as a fraction of the reference front's

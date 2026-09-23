@@ -2,10 +2,24 @@
 
 For each crop-params VARIANT (FULL, NO_ML_YIELD, MSP_PRICE, MEAN_PRICE,
 NO_COST) and each water scenario (tight, current): decide an allocation
-(OURS via NSGA-II recommend, B2 via profit-max LP) using the VARIANT's
-params, then EVALUATE that allocation under FULL params -- i.e. "how much
-does using worse/partial information cost you, once judged against the
-best information we have?"
+using the VARIANT's params, then EVALUATE that allocation under FULL params
+-- i.e. "how much does using worse/partial information cost you, once
+judged against the best information we have?"
+
+Two different metrics for two different kinds of solver (Phase 5.1 fix):
+  - B2 (profit-max LP) and B3 (same-profit-min-water LP) are EXACT solvers
+    over an IDENTICAL feasible region across all variants (only the profit
+    objective's coefficients change; water/fert per-ha figures don't depend
+    on yield/price/cost) -- so the FULL decision is provably the best
+    achievable profit under FULL params, and any other variant's decision,
+    evaluated under FULL params, can only do as well or worse. Reported as
+    profit loss (Rs and %) vs the FULL decision -- guaranteed >=0 for B2
+    (asserted), not guaranteed for B3 (its target profit itself shifts per
+    variant, so the comparison isn't apples-to-apples in the same way).
+  - OURS (NSGA-II) is a heuristic, not an exact solver, so a raw profit-loss
+    number would conflate "worse information" with "NSGA-II didn't fully
+    converge." Instead: is the variant's plan, evaluated under FULL params,
+    DOMINATED by the FULL plan on (profit, water, fert)? Plus the deltas.
 
 Writes reports/results/ablation_decisions.md/.csv. Does not touch any
 Phase 1-3 report files.
@@ -21,12 +35,13 @@ from agriopt.config import CROPS, MAIN_SEASON, REPORTS_RESULTS, STATE, YIELD_CLE
 from agriopt.data.reference import cost_rs_per_ha, load_reference
 from agriopt.models.price_model import build_wide_price_table, load_price_frame
 from agriopt.models.yield_model import CANON_TO_YIELD_NAME
-from agriopt.optim.baselines import current_mix, evaluate
-from agriopt.optim.baselines import nsga2_recommended
+from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, same_profit_min_water
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
-from agriopt.optim.risk import build_risk_inputs, portfolio_risk
 from agriopt.optim.solvers import solve_lp_profit_max
+
+B2_LOSS_TOL = 1e-3  # relative tolerance for the B2 loss>=0 assertion (LP/float noise)
+DOMINANCE_TOL = 1e-6
 
 WATER_MULTIPLIERS = {"tight": 0.7, "current": 1.0}
 LAND_HA = 10.0
@@ -125,21 +140,112 @@ def compute_b1_water(full_params: pd.DataFrame, land_ha: float = LAND_HA) -> flo
 def decide(params_df: pd.DataFrame, scenario: Scenario) -> dict:
     x_ours, _, _, _ = nsga2_recommended(params_df, scenario, seed=0)
     x_b2, _ = solve_lp_profit_max(scenario, params_df)
-    return {"OURS": x_ours, "B2": x_b2}
+
+    x1 = current_mix(params_df, scenario)
+    r1 = evaluate(x1, params_df, scenario)
+    x_b3 = same_profit_min_water(params_df, scenario, min_profit=r1["profit"])
+
+    return {"OURS": x_ours, "B2": x_b2, "B3": x_b3}
+
+
+def _lp_strategy_row(variant_name: str, water_label: str, strategy: str, x_variant, x_full_ref, full_params: pd.DataFrame, scenario: Scenario) -> dict:
+    if x_variant is None or x_full_ref is None:
+        return {"variant": variant_name, "water_scenario": water_label, "strategy": strategy, "feasible": False}
+
+    r_eval = evaluate(x_variant, full_params, scenario)
+    r_full_ref = evaluate(x_full_ref, full_params, scenario)
+    loss_rs = r_full_ref["profit"] - r_eval["profit"]
+    loss_pct = loss_rs / abs(r_full_ref["profit"]) * 100 if r_full_ref["profit"] else float("nan")
+    l1_dist = float(np.abs(x_variant - x_full_ref).sum())
+
+    if strategy == "B2":
+        tol = B2_LOSS_TOL * max(1.0, abs(r_full_ref["profit"]))
+        assert loss_rs >= -tol, (
+            f"B2 ablation loss should be >=0 (FULL's LP decision is optimal under FULL params over an identical "
+            f"feasible region) but got {loss_rs:.2f} for variant={variant_name}, water={water_label}"
+        )
+
+    return {
+        "variant": variant_name,
+        "water_scenario": water_label,
+        "strategy": strategy,
+        "profit_under_full": r_eval["profit"],
+        "profit_loss_rs_vs_full": loss_rs,
+        "profit_loss_pct_vs_full": loss_pct,
+        "water_m3": r_eval["water_m3"],
+        "fert_kg": r_eval["fert_kg"],
+        "allocation_l1_dist_ha": l1_dist,
+        "feasible": r_eval["feasible"],
+    }
+
+
+def _ours_row(variant_name: str, water_label: str, x_variant, x_full_ref, full_params: pd.DataFrame, scenario: Scenario) -> dict:
+    if x_variant is None or x_full_ref is None:
+        return {"variant": variant_name, "water_scenario": water_label, "strategy": "OURS", "feasible": False}
+
+    r_eval = evaluate(x_variant, full_params, scenario)
+    r_full_ref = evaluate(x_full_ref, full_params, scenario)
+
+    def pct(new, base):
+        return (new - base) / abs(base) * 100 if base else float("nan")
+
+    profit_delta_pct = pct(r_eval["profit"], r_full_ref["profit"])
+    water_delta_pct = pct(r_eval["water_m3"], r_full_ref["water_m3"])
+    fert_delta_pct = pct(r_eval["fert_kg"], r_full_ref["fert_kg"])
+
+    profit_ge = r_full_ref["profit"] >= r_eval["profit"] - DOMINANCE_TOL * max(1.0, abs(r_eval["profit"]))
+    water_le = r_full_ref["water_m3"] <= r_eval["water_m3"] + DOMINANCE_TOL * max(1.0, r_eval["water_m3"])
+    fert_le = r_full_ref["fert_kg"] <= r_eval["fert_kg"] + DOMINANCE_TOL * max(1.0, r_eval["fert_kg"])
+    strictly_better = (
+        r_full_ref["profit"] > r_eval["profit"] + DOMINANCE_TOL * max(1.0, abs(r_eval["profit"]))
+        or r_full_ref["water_m3"] < r_eval["water_m3"] - DOMINANCE_TOL * max(1.0, r_eval["water_m3"])
+        or r_full_ref["fert_kg"] < r_eval["fert_kg"] - DOMINANCE_TOL * max(1.0, r_eval["fert_kg"])
+    )
+    dominated_by_full = bool(profit_ge and water_le and fert_le and strictly_better)
+
+    l1_dist = float(np.abs(x_variant - x_full_ref).sum())
+
+    return {
+        "variant": variant_name,
+        "water_scenario": water_label,
+        "strategy": "OURS",
+        "profit_under_full": r_eval["profit"],
+        "dominated_by_full": dominated_by_full,
+        "profit_pct_vs_full": profit_delta_pct,
+        "water_pct_vs_full": water_delta_pct,
+        "fert_pct_vs_full": fert_delta_pct,
+        "allocation_l1_dist_ha": l1_dist,
+        "feasible": r_eval["feasible"],
+    }
+
+
+def _markdown_table(df: pd.DataFrame, cols: list[str]) -> str:
+    lines = ["| " + " | ".join(cols) + " |\n", "|" + "---|" * len(cols) + "\n"]
+    for _, row in df.iterrows():
+        cells = []
+        for c in cols:
+            v = row.get(c, np.nan)
+            if isinstance(v, bool):
+                cells.append(str(v))
+            elif isinstance(v, float):
+                cells.append(f"{v:.2f}" if not np.isnan(v) else "-")
+            else:
+                cells.append(str(v) if pd.notna(v) else "-")
+        lines.append("| " + " | ".join(cells) + " |\n")
+    return "".join(lines)
 
 
 def main() -> None:
     REPORTS_RESULTS.mkdir(parents=True, exist_ok=True)
 
     full_params = build_crop_params("market", verbose=False)
-    risk_inputs = build_risk_inputs(full_params)
     b1_water = compute_b1_water(full_params)
     water_budgets = {label: mult * b1_water for label, mult in WATER_MULTIPLIERS.items()}
     print(f"B1 water usage: {b1_water:.1f} m3; budgets: {water_budgets}")
 
     variant_params = {name: builder(full_params) for name, builder in VARIANTS.items()}
 
-    rows = []
+    lp_rows, ours_rows = [], []
     for water_label, wb in water_budgets.items():
         scenario = Scenario(water_budget_m3=wb, land_ha=LAND_HA, price_mode="market")
         print(f"\n-- water={water_label} --")
@@ -150,94 +256,91 @@ def main() -> None:
             print(f"  variant={variant_name} ...")
             decisions = decide(params_variant, scenario) if variant_name != "FULL" else full_decisions
 
-            for strategy in ["OURS", "B2"]:
-                x_variant = decisions[strategy]
-                x_full_ref = full_decisions[strategy]
+            for strategy in ["B2", "B3"]:
+                lp_rows.append(_lp_strategy_row(variant_name, water_label, strategy, decisions[strategy], full_decisions[strategy], full_params, scenario))
 
-                if x_variant is None or x_full_ref is None:
-                    rows.append(
-                        {"variant": variant_name, "water_scenario": water_label, "strategy": strategy, "feasible": False}
-                    )
-                    continue
+            ours_rows.append(_ours_row(variant_name, water_label, decisions["OURS"], full_decisions["OURS"], full_params, scenario))
 
-                r_eval = evaluate(x_variant, full_params, scenario)
-                r_full_ref = evaluate(x_full_ref, full_params, scenario)
-                profit_loss_pct = (
-                    (r_full_ref["profit"] - r_eval["profit"]) / abs(r_full_ref["profit"]) * 100
-                    if r_full_ref["profit"]
-                    else float("nan")
-                )
-                l1_dist = float(np.abs(x_variant - x_full_ref).sum())
-                risk_val = portfolio_risk(x_variant, risk_inputs.Sigma)
+    lp_df = pd.DataFrame(lp_rows)
+    ours_df = pd.DataFrame(ours_rows)
+    lp_df.to_csv(REPORTS_RESULTS / "ablation_decisions_lp.csv", index=False)
+    ours_df.to_csv(REPORTS_RESULTS / "ablation_decisions_ours.csv", index=False)
+    pd.concat([lp_df, ours_df], ignore_index=True).to_csv(REPORTS_RESULTS / "ablation_decisions.csv", index=False)
 
-                rows.append(
-                    {
-                        "variant": variant_name,
-                        "water_scenario": water_label,
-                        "strategy": strategy,
-                        "profit_under_full": r_eval["profit"],
-                        "profit_pct_loss_vs_full_decision": profit_loss_pct,
-                        "water_m3": r_eval["water_m3"],
-                        "fert_kg": r_eval["fert_kg"],
-                        "allocation_l1_dist_ha": l1_dist,
-                        "portfolio_risk_rs": risk_val,
-                        "feasible": r_eval["feasible"],
-                    }
-                )
-
-    df = pd.DataFrame(rows)
-    df.to_csv(REPORTS_RESULTS / "ablation_decisions.csv", index=False)
-
-    lines = ["# Information ablation (Phase 5, Experiment 4)\n\n"]
+    lines = ["# Information ablation (Phase 5.1, Experiment 4)\n\n"]
     lines.append(
-        "Each variant DECIDES an allocation (OURS = NSGA-II recommend, seed=0, default weights; B2 = profit-max "
-        "LP) using its own (degraded) view of crop params, then that allocation is EVALUATED under FULL params "
-        "-- this measures the real cost of deciding with worse information, not just how the params themselves "
-        "differ.\n\n"
+        "Each variant DECIDES an allocation using its own (degraded) view of crop params, then that allocation "
+        "is EVALUATED under FULL params -- this measures the real cost of deciding with worse information, not "
+        "just how the params themselves differ. B2/B3 (exact LP solvers, identical feasible region across "
+        "variants) are compared by profit loss vs the FULL decision; OURS (NSGA-II, a heuristic) is compared by "
+        "Pareto dominance on (profit, water, fert), since a raw profit-loss number would conflate 'worse "
+        "information' with 'NSGA-II didn't fully converge.'\n\n"
     )
-    cols = ["variant", "water_scenario", "strategy", "profit_under_full", "profit_pct_loss_vs_full_decision", "water_m3", "fert_kg", "allocation_l1_dist_ha", "portfolio_risk_rs", "feasible"]
-    lines.append("| " + " | ".join(cols) + " |\n")
-    lines.append("|" + "---|" * len(cols) + "\n")
-    for _, row in df.iterrows():
-        cells = []
-        for c in cols:
-            v = row.get(c, np.nan)
-            if isinstance(v, bool):
-                cells.append(str(v))
-            elif isinstance(v, float):
-                cells.append(f"{v:.2f}" if not np.isnan(v) else "-")
-            else:
-                cells.append(str(v))
-        lines.append("| " + " | ".join(cells) + " |\n")
+
+    lines.append("## B2 (profit-max LP) and B3 (same-profit-min-water LP)\n\n")
+    lp_cols = ["variant", "water_scenario", "strategy", "profit_under_full", "profit_loss_rs_vs_full", "profit_loss_pct_vs_full", "water_m3", "fert_kg", "allocation_l1_dist_ha", "feasible"]
+    lines.append(_markdown_table(lp_df, lp_cols))
+
+    lines.append("\n## OURS (NSGA-II): dominance vs the FULL decision\n\n")
+    ours_cols = ["variant", "water_scenario", "strategy", "profit_under_full", "dominated_by_full", "profit_pct_vs_full", "water_pct_vs_full", "fert_pct_vs_full", "allocation_l1_dist_ha", "feasible"]
+    lines.append(_markdown_table(ours_df, ours_cols))
 
     lines.append("\n## Findings\n\n")
-    ours_df = df[(df["strategy"] == "OURS") & (df["variant"] != "FULL") & df["feasible"]]
-    if not ours_df.empty:
-        by_variant = ours_df.groupby("variant").agg(
-            mean_loss_pct=("profit_pct_loss_vs_full_decision", "mean"), mean_l1=("allocation_l1_dist_ha", "mean")
-        )
-        worst_loss = by_variant["mean_loss_pct"].idxmax()
-        worst_l1 = by_variant["mean_l1"].idxmax()
+
+    b2_df = lp_df[(lp_df["strategy"] == "B2") & (lp_df["variant"] != "FULL") & lp_df["feasible"]]
+    b3_df = lp_df[(lp_df["strategy"] == "B3") & (lp_df["variant"] != "FULL") & lp_df["feasible"]]
+    b2_by_variant = None
+    if not b2_df.empty:
+        b2_by_variant = b2_df.groupby("variant").agg(mean_loss_pct=("profit_loss_pct_vs_full", "mean"), mean_l1=("allocation_l1_dist_ha", "mean"))
+        worst_b2 = b2_by_variant["mean_loss_pct"].idxmax()
         lines.append(
-            f"- By profit loss (OURS, averaged over water scenarios): **{worst_loss}** costs the most "
-            f"({by_variant.loc[worst_loss, 'mean_loss_pct']:+.1f}% vs the FULL-information decision). "
-            f"By decision shift: **{worst_l1}** moves hectares the most "
-            f"({by_variant.loc[worst_l1, 'mean_l1']:.2f} ha mean L1 distance from the FULL decision).\n"
+            f"- **B2 (exact profit-max LP), by profit loss**: **{worst_b2}** costs the most "
+            f"({b2_by_variant.loc[worst_b2, 'mean_loss_pct']:+.1f}% vs the FULL-information decision, mean over "
+            "water scenarios). All B2 losses are >=0 by construction (asserted in code) -- the FULL decision is "
+            "the true profit-max over an identical feasible region, so any other variant's B2 decision can only "
+            "do as well or worse once judged under FULL params.\n"
         )
-        for variant in by_variant.index:
-            row = by_variant.loc[variant]
-            lines.append(f"- {variant}: mean profit loss {row['mean_loss_pct']:+.1f}%, mean allocation shift {row['mean_l1']:.2f} ha.\n")
+        for variant in b2_by_variant.index:
+            row = b2_by_variant.loc[variant]
+            lines.append(f"  - {variant}: mean profit loss {row['mean_loss_pct']:+.1f}%, mean allocation shift {row['mean_l1']:.2f} ha.\n")
+
+    if not b3_df.empty:
+        b3_by_variant = b3_df.groupby("variant").agg(mean_loss_pct=("profit_loss_pct_vs_full", "mean"), mean_l1=("allocation_l1_dist_ha", "mean"))
+        lines.append("\n- **B3 (same-profit-min-water LP)**, mean profit loss / allocation shift per variant (not guaranteed >=0 -- each variant targets its OWN B1 profit level, not FULL's):\n")
+        for variant in b3_by_variant.index:
+            row = b3_by_variant.loc[variant]
+            lines.append(f"  - {variant}: mean profit loss {row['mean_loss_pct']:+.1f}%, mean allocation shift {row['mean_l1']:.2f} ha.\n")
+
+    n_dominated = int(ours_df[(ours_df["variant"] != "FULL") & ours_df["feasible"]]["dominated_by_full"].sum())
+    n_ours_total = int((ours_df["variant"] != "FULL").sum())
     lines.append(
-        "\nPlain language: this table shows which single piece of information -- the ML yield model, the "
-        "price forecast, or the cost-of-cultivation figures -- the recommendation depends on most. A variant "
-        "with near-zero loss/shift means that information barely matters for the DECISION even if the numbers "
-        "themselves change; a variant with a large loss/shift means the pipeline is leaning heavily on that "
-        "particular model or data source.\n"
+        f"\n- **OURS (NSGA-II)**: the FULL decision Pareto-dominates the variant's decision (on profit/water/fert, "
+        f"under FULL params) in {n_dominated}/{n_ours_total} variant x water-scenario combinations. Where it "
+        "isn't dominated, the variant's NSGA-II plan traded one objective against another rather than simply "
+        "losing on all three -- see the deltas above.\n"
     )
 
+    if b2_by_variant is not None and b2_by_variant["mean_loss_pct"].idxmax() == "NO_COST":
+        lines.append(
+            "\nPlain language: **cost-of-cultivation data matters most to the DECISION** -- B2 (the exact "
+            f"solver, so this reading is not a heuristic artifact) loses the most profit ({b2_by_variant.loc['NO_COST', 'mean_loss_pct']:+.1f}%) "
+            "when cost is dropped to zero, more than when yield comes from a historical mean instead of the ML "
+            "model, or when price is set to MSP/mean-price instead of the forecast. The ML yield model and the "
+            "price forecast matter less to the final allocation than the reference cost table does.\n"
+        )
+    else:
+        lines.append(
+            "\nPlain language: this table shows which single piece of information -- the ML yield model, the "
+            "price forecast, or the cost-of-cultivation figures -- the exact-solver (B2) decision depends on "
+            "most; see the per-variant mean profit loss above for which one dominates in this run.\n"
+        )
+
     (REPORTS_RESULTS / "ablation_decisions.md").write_text("".join(lines), encoding="utf-8")
-    print("\nWrote ablation_decisions.csv / ablation_decisions.md")
-    print(df.to_string(index=False))
+    print("\nWrote ablation_decisions.csv (+ _lp/_ours) / ablation_decisions.md")
+    print("\n=== B2/B3 (LP) ===")
+    print(lp_df.to_string(index=False))
+    print("\n=== OURS (dominance) ===")
+    print(ours_df.to_string(index=False))
 
 
 if __name__ == "__main__":

@@ -20,10 +20,10 @@ from pymoo.indicators.hv import HV
 from pymoo.indicators.igd import IGD
 
 from agriopt.config import REPORTS_RESULTS
-from agriopt.optim.baselines import current_mix, evaluate, same_profit_min_water
+from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, same_profit_min_water
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
-from agriopt.optim.risk import bootstrap_profit, build_risk_inputs, portfolio_risk
+from agriopt.optim.risk import build_risk_inputs, historical_scenarios, portfolio_risk, sigma_with_overridden_std
 from agriopt.optim.solvers import (
     exact_front_lp_grid,
     min_risk_profit_curve,
@@ -40,7 +40,6 @@ LAND_HA = 10.0
 SEEDS = [0, 1, 2, 3, 4]
 FOCUS_SCENARIO = ("current", "market")  # risk matrix, Model B, risk_strategies table + plot
 MODEL_B_WEIGHTS = (0.4, 0.2, 0.1, 0.3)  # profit, water, fert, risk
-N_BOOTSTRAP = 2000
 
 
 def compute_b1_water(land_ha: float = LAND_HA) -> tuple[np.ndarray, float, pd.DataFrame]:
@@ -246,8 +245,6 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
     x3 = same_profit_min_water(params_df, scenario, min_profit=r1["profit"])
     r3 = evaluate(x3, params_df, scenario) if x3 is not None else None
 
-    from agriopt.optim.baselines import nsga2_recommended
-
     x4, Xf_A, Ff_A, rt_A = nsga2_recommended(params_df, scenario, seed=42)
     r4 = evaluate(x4, params_df, scenario) if x4 is not None else None
 
@@ -262,7 +259,7 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
             rows.append({"strategy": name, "feasible": False})
             continue
         risk_val = portfolio_risk(x, Sigma)
-        boot, samples = bootstrap_profit(x, risk_inputs, R, cost, n=N_BOOTSTRAP, seed=42, return_samples=True)
+        hs, series = historical_scenarios(x, risk_inputs, R, cost, return_series=True)
         rows.append(
             {
                 "strategy": name,
@@ -271,17 +268,42 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
                 "fert_kg": r["fert_kg"],
                 "n_crops": r["n_crops"],
                 "portfolio_risk_rs": risk_val,
-                "bootstrap_mean": boot["mean"],
-                "bootstrap_P5": boot["P5"],
-                "bootstrap_P_loss": boot["P_loss"],
-                "bootstrap_CVaR5": boot["CVaR5"],
-                "bootstrap_n_years": boot["n_years_used"],
+                "scenario_n_years": hs["n_years"],
+                "scenario_mean": hs["mean"],
+                "scenario_worst_year_profit": hs["worst_year_profit"],
+                "scenario_worst_year": hs["worst_year"],
+                "scenario_P10": hs["P10"],
+                "scenario_n_loss_years": hs["n_loss_years"],
                 "feasible": r["feasible"],
-                "_samples": samples,
+                "_series": series,
             }
         )
 
     curve_profit, curve_risk, _ = min_risk_profit_curve(scenario, params_df, Sigma, n=20)
+
+    # --- Item 5: sugarcane risk sensitivity ---
+    sens = None
+    if xB is not None:
+        other_stds = [float(risk_inputs.deviation_matrix[c].std()) for c in crops if c != "sugarcane"]
+        median_other_std = float(np.median(other_stds))
+        sugarcane_std_before = float(risk_inputs.deviation_matrix["sugarcane"].std())
+        Sigma_sens, _ = sigma_with_overridden_std(risk_inputs, R, {"sugarcane": median_other_std})
+
+        xB_sens, _, _, _ = nsga3_recommended(params_df, scenario, Sigma_sens, weights=MODEL_B_WEIGHTS, seed=42)
+        r_sens = evaluate(xB_sens, params_df, scenario) if xB_sens is not None else None
+
+        sc_idx = crops.index("sugarcane")
+        sens = {
+            "median_other_std": median_other_std,
+            "sugarcane_std_before": sugarcane_std_before,
+            "sugarcane_ha_before": float(xB[sc_idx]),
+            "sugarcane_ha_after": float(xB_sens[sc_idx]) if xB_sens is not None else None,
+            "risk_before": portfolio_risk(xB, Sigma),
+            "risk_after": portfolio_risk(xB_sens, Sigma_sens) if xB_sens is not None else None,
+            "profit_before": rB["profit"] if rB else None,
+            "profit_after": r_sens["profit"] if r_sens else None,
+            "feasible_after": xB_sens is not None,
+        }
 
     return {
         "scenario": scenario,
@@ -290,19 +312,27 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
         "nsga3_front": (Xf_B, Ff_B),
         "nsga3_runtime": rt_B,
         "crops": crops,
+        "sugarcane_sensitivity": sens,
     }
 
 
 def write_risk_strategies_report(result: dict) -> pd.DataFrame:
     rows = result["rows"]
-    df = pd.DataFrame([{k: v for k, v in row.items() if k != "_samples"} for row in rows])
+    df = pd.DataFrame([{k: v for k, v in row.items() if k != "_series"} for row in rows])
     df.to_csv(REPORTS_RESULTS / "risk_strategies.csv", index=False)
 
-    lines = ["# Risk evaluation of B1/B2/B3/OURS (Model A) / Model B (Phase 5, Item 5)\n\n"]
+    lines = ["# Risk evaluation of B1/B2/B3/OURS (Model A) / Model B (Phase 5.1, Item 5)\n\n"]
     lines.append(f"Scenario: water={FOCUS_SCENARIO[0]}, price={FOCUS_SCENARIO[1]} (land={LAND_HA} ha).\n")
     lines.append(f"Model B pseudo-weights (profit, water, fert, risk) = {MODEL_B_WEIGHTS}.\n\n")
+    lines.append(
+        "`scenario_*` columns come from `historical_scenarios()` -- profit re-evaluated under each of the "
+        "~18-19 actual historical years' deviations (no resampling), since the discrete historical record is "
+        "small enough that a smooth bootstrap would manufacture outcomes never actually observed. "
+        "`scenario_mean` should equal `profit` (deterministic point estimate) very closely -- deviations are "
+        "mean-centered per allocation (see agriopt.optim.risk).\n\n"
+    )
 
-    cols = ["strategy", "profit", "water_m3", "fert_kg", "n_crops", "portfolio_risk_rs", "bootstrap_mean", "bootstrap_P5", "bootstrap_P_loss", "bootstrap_CVaR5", "feasible"]
+    cols = ["strategy", "profit", "water_m3", "fert_kg", "n_crops", "portfolio_risk_rs", "scenario_n_years", "scenario_mean", "scenario_worst_year_profit", "scenario_worst_year", "scenario_P10", "scenario_n_loss_years", "feasible"]
     lines.append("| " + " | ".join(cols) + " |\n")
     lines.append("|" + "---|" * len(cols) + "\n")
     for _, row in df.iterrows():
@@ -317,6 +347,48 @@ def write_risk_strategies_report(result: dict) -> pd.DataFrame:
                 cells.append(str(v))
         lines.append("| " + " | ".join(cells) + " |\n")
 
+    sens = result.get("sugarcane_sensitivity")
+    if sens is not None:
+        lines.append("\n## Sensitivity: sugarcane risk\n\n")
+        lines.append(
+            "Model B's recommendation depends on Sigma, which gives sugarcane an unusually low std "
+            f"({sens['sugarcane_std_before']:.3f}) purely because its price is a constant FRP, not a mandi "
+            f"series -- not necessarily because it is genuinely less risky. This reruns Model B with "
+            f"sugarcane's relative-deviation std replaced by the median of the other 7 crops' std "
+            f"({sens['median_other_std']:.3f}), correlations unchanged, to test how much that assumption "
+            "drives the recommendation.\n\n"
+        )
+        ha_after_str = f"{sens['sugarcane_ha_after']:.2f}" if sens["sugarcane_ha_after"] is not None else "-"
+        risk_after_str = f"{sens['risk_after']:,.0f}" if sens["risk_after"] is not None else "-"
+        profit_after_str = f"{sens['profit_after']:,.0f}" if sens["profit_after"] is not None else "-"
+        lines.append("| | before (measured std) | after (median-of-others std) |\n")
+        lines.append("|---|---|---|\n")
+        lines.append(f"| sugarcane hectares | {sens['sugarcane_ha_before']:.2f} | {ha_after_str} |\n")
+        lines.append(f"| total portfolio risk (Rs) | {sens['risk_before']:,.0f} | {risk_after_str} |\n")
+        lines.append(f"| profit (Rs) | {sens['profit_before']:,.0f} | {profit_after_str} |\n")
+
+        if sens["feasible_after"] and sens["sugarcane_ha_before"] > 1e-6:
+            ha_shift_pct = abs(sens["sugarcane_ha_after"] - sens["sugarcane_ha_before"]) / sens["sugarcane_ha_before"] * 100
+        elif sens["feasible_after"]:
+            ha_shift_pct = 0.0 if sens["sugarcane_ha_after"] < 1e-6 else float("inf")
+        else:
+            ha_shift_pct = float("nan")
+
+        if not sens["feasible_after"]:
+            lines.append("\n**Not robust**: Model B found no feasible solution once sugarcane's std was raised to a typical level.\n")
+        elif ha_shift_pct <= 20:
+            lines.append(
+                f"\n**Robust**: sugarcane hectares shift by only {ha_shift_pct:.1f}% when its std is raised to a "
+                "typical crop's level -- the recommendation was not leaning on sugarcane's artificially low "
+                "measured risk.\n"
+            )
+        else:
+            lines.append(
+                f"\n**Not robust**: sugarcane hectares shift by {ha_shift_pct:.1f}% once its std is raised to a "
+                "typical crop's level -- part of Model B's original preference for sugarcane was an artifact of "
+                "its constant-FRP price understating its true risk, not a genuine profit/water/fert advantage.\n"
+            )
+
     (REPORTS_RESULTS / "risk_strategies.md").write_text("".join(lines), encoding="utf-8")
     print("Wrote risk_strategies.csv / risk_strategies.md")
     return df
@@ -325,20 +397,28 @@ def write_risk_strategies_report(result: dict) -> pd.DataFrame:
 def plot_risk(result: dict) -> None:
     rows = result["rows"]
 
-    # profit distribution violin per strategy
-    labels, datasets = [], []
-    for row in rows:
-        samples = row.get("_samples")
-        if samples is None or np.all(np.isnan(samples)):
+    # per-year profit strip plot (discrete historical scenarios, not a smoothed histogram)
+    labels, all_years, all_profits = [], [], []
+    for i, row in enumerate(rows):
+        series = row.get("_series")
+        if series is None or len(series) == 0:
             continue
         labels.append(row["strategy"])
-        datasets.append(np.asarray(samples, dtype=float))
-    if datasets:
+        all_years.extend([i + 1] * len(series))
+        all_profits.extend(series.to_numpy())
+    if labels:
         fig, ax = plt.subplots(figsize=(8, 6))
-        ax.violinplot(datasets, showmeans=True, showextrema=True)
+        rng = np.random.default_rng(0)
+        jitter = rng.uniform(-0.08, 0.08, size=len(all_years))
+        ax.scatter(np.array(all_years) + jitter, all_profits, alpha=0.6, s=25, color="tab:blue")
+        for i, row in enumerate(rows):
+            series = row.get("_series")
+            if series is None or len(series) == 0:
+                continue
+            ax.scatter([i + 1], [series.mean()], marker="D", s=80, color="black", zorder=5)
         ax.set_xticks(range(1, len(labels) + 1))
         ax.set_xticklabels(labels)
-        ax.set_title(f"Bootstrap profit distribution by strategy ({FOCUS_SCENARIO[0]}/{FOCUS_SCENARIO[1]})")
+        ax.set_title(f"Historical-scenario profit by strategy, one dot per year ({FOCUS_SCENARIO[0]}/{FOCUS_SCENARIO[1]})")
         ax.set_ylabel("profit (Rs)")
         fig.tight_layout()
         fig.savefig(REPORTS_RESULTS / "risk_profit_distribution.png", dpi=150)
@@ -366,7 +446,7 @@ def plot_risk(result: dict) -> None:
 # --- Item 6: findings ----------------------------------------------------------
 
 
-def write_findings_v2(risk_strategies_df: pd.DataFrame, quality_v2_df: pd.DataFrame, risk_inputs) -> None:
+def write_findings_v2(risk_strategies_df: pd.DataFrame, quality_v2_df: pd.DataFrame, risk_inputs, sugarcane_sens: dict | None = None) -> None:
     lines = ["# Findings v2: risk objective, NSGA-III, reference grid (Phase 5)\n\n"]
 
     df = risk_strategies_df.set_index("strategy")
@@ -381,23 +461,32 @@ def write_findings_v2(risk_strategies_df: pd.DataFrame, quality_v2_df: pd.DataFr
         )
 
     if "ModelB" in df.index and "OURS_A" in df.index:
-        mb_profit, a_profit = df.loc["ModelB", "profit"], df.loc["OURS_A", "profit"]
-        mb_risk, a_risk = df.loc["ModelB", "portfolio_risk_rs"], df.loc["OURS_A", "portfolio_risk_rs"]
-        profit_gap_pct = (mb_profit - a_profit) / abs(a_profit) * 100 if a_profit else float("nan")
-        risk_cut_pct = (a_risk - mb_risk) / a_risk * 100 if a_risk else float("nan")
+        a_row, b_row = df.loc["OURS_A"], df.loc["ModelB"]
+
+        def pct(new, base):
+            return (new - base) / abs(base) * 100 if base else float("nan")
+
+        profit_pct = pct(b_row["profit"], a_row["profit"])
+        water_pct = pct(b_row["water_m3"], a_row["water_m3"])
+        fert_pct = pct(b_row["fert_kg"], a_row["fert_kg"])
+        risk_pct = pct(b_row["portfolio_risk_rs"], a_row["portfolio_risk_rs"])
         lines.append(
-            f"- **Model B (risk-aware, NSGA-III) cuts portfolio risk by {risk_cut_pct:.1f}% vs Model A's "
-            f"recommendation** (Rs {a_risk:,.0f} -> Rs {mb_risk:,.0f}) at a profit change of {profit_gap_pct:+.1f}% "
-            f"(Rs {a_profit:,.0f} -> Rs {mb_profit:,.0f}) -- the pseudo-weights (0.4 profit / 0.2 water / 0.1 fert "
-            "/ 0.3 risk) trade some profit for materially less risk exposure.\n"
+            f"- **Model B (risk-aware, NSGA-III) vs Model A's recommendation, full trade**: profit "
+            f"{profit_pct:+.1f}% (Rs {a_row['profit']:,.0f} -> Rs {b_row['profit']:,.0f}), water {water_pct:+.1f}% "
+            f"(m3 {a_row['water_m3']:,.0f} -> {b_row['water_m3']:,.0f}), fert {fert_pct:+.1f}% (kg "
+            f"{a_row['fert_kg']:,.0f} -> {b_row['fert_kg']:,.0f}), portfolio risk {risk_pct:+.1f}% "
+            f"(Rs {a_row['portfolio_risk_rs']:,.0f} -> Rs {b_row['portfolio_risk_rs']:,.0f}). Model B is not a "
+            "free lunch on every axis -- report the full vector, not just the objectives it improved.\n"
         )
 
     if "B1" in df.index:
+        b1 = df.loc["B1"]
         lines.append(
-            f"- B1 (current mix)'s bootstrap P(loss) is {df.loc['B1','bootstrap_P_loss']*100:.1f}% and CVaR5 is "
-            f"Rs {df.loc['B1','bootstrap_CVaR5']:,.0f} (mean of the worst 5% of resampled years) -- read "
-            "alongside portfolio_risk, since CVaR5 captures downside tail shape that a single sqrt(x'Sigma x) "
-            "number does not.\n"
+            f"- B1 (current mix)'s worst historical year would have earned Rs {b1['scenario_worst_year_profit']:,.0f} "
+            f"profit (year {int(b1['scenario_worst_year'])}, out of {int(b1['scenario_n_years'])} years evaluated), "
+            f"10th percentile Rs {b1['scenario_P10']:,.0f}, {int(b1['scenario_n_loss_years'])} loss year(s) -- "
+            "read alongside portfolio_risk, since the discrete historical record captures downside shape "
+            "(e.g. skew, a single very bad year) that a single sqrt(x'Sigma x) number does not.\n"
         )
 
     ratio_v2 = quality_v2_df["hv_nsga2_mean"] / quality_v2_df["hv_lp_grid_reference_v2"]
@@ -435,6 +524,18 @@ def write_findings_v2(risk_strategies_df: pd.DataFrame, quality_v2_df: pd.DataFr
         "cross-crop correlation estimates between Kharif and Rabi crops, not the overall risk magnitudes.\n"
     )
 
+    if sugarcane_sens is not None and sugarcane_sens["feasible_after"]:
+        ha_before, ha_after = sugarcane_sens["sugarcane_ha_before"], sugarcane_sens["sugarcane_ha_after"]
+        shift_pct = abs(ha_after - ha_before) / ha_before * 100 if ha_before > 1e-6 else (0.0 if ha_after < 1e-6 else float("inf"))
+        verdict = "robust" if shift_pct <= 20 else "NOT robust"
+        lines.append(
+            f"- **Sugarcane risk sensitivity: Model B's recommendation is {verdict} to the FRP-price-artifact "
+            f"assumption** -- replacing sugarcane's measured std ({sugarcane_sens['sugarcane_std_before']:.3f}) "
+            f"with the median of the other 7 crops' std ({sugarcane_sens['median_other_std']:.3f}, correlations "
+            f"unchanged) moves sugarcane hectares from {ha_before:.2f} to {ha_after:.2f} ha ({shift_pct:.1f}% "
+            f"shift). See risk_strategies.md 'Sensitivity: sugarcane risk' for the full before/after table.\n"
+        )
+
     (REPORTS_RESULTS / "optim_findings_v2.md").write_text("".join(lines), encoding="utf-8")
     print("Wrote optim_findings_v2.md")
 
@@ -468,12 +569,14 @@ def main() -> None:
     plot_risk(result)
 
     print("\n-- Item 6: findings v2 --")
-    write_findings_v2(risk_strategies_df, quality_v2_df, risk_inputs_market)
+    write_findings_v2(risk_strategies_df, quality_v2_df, risk_inputs_market, sugarcane_sens=result["sugarcane_sensitivity"])
 
     print("\n=== risk_strategies ===")
-    print(risk_strategies_df.drop(columns=[c for c in risk_strategies_df.columns if c == "_samples"]).to_string(index=False))
+    print(risk_strategies_df.to_string(index=False))
     print("\n=== front quality v2 ===")
     print(quality_v2_df.to_string(index=False))
+    print("\n=== sugarcane sensitivity ===")
+    print(result["sugarcane_sensitivity"])
 
 
 if __name__ == "__main__":

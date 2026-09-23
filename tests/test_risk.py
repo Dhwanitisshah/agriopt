@@ -76,11 +76,91 @@ def test_portfolio_risk_scales_linearly(risk_inputs):
     assert r2 == pytest.approx(2.5 * r1, rel=1e-6)
 
 
-# --- bootstrap ---------------------------------------------------------------
+# --- centering (Phase 5.1, Item 1) ---------------------------------------------
 
 
-def test_bootstrap_deterministic_with_seed(params, risk_inputs):
-    from agriopt.optim.risk import bootstrap_profit
+def test_deviation_matrix_is_centered(risk_inputs):
+    means = risk_inputs.deviation_matrix.mean()
+    assert (means.abs() < 1e-9).all()
+
+
+# --- historical_scenarios (Phase 5.1, Item 2) -----------------------------------
+
+
+def test_historical_scenarios_mean_matches_deterministic_profit(params, risk_inputs, scenario):
+    """Scenario mean must be within +-2% of deterministic profit x@(R-cost)
+    for every strategy (B1/B2/B3/OURS), per the Phase 5.1 fix."""
+    from agriopt.optim.baselines import evaluate, nsga2_recommended, same_profit_min_water
+    from agriopt.optim.risk import historical_scenarios
+    from agriopt.optim.solvers import solve_lp_profit_max
+
+    scen, x1 = scenario
+    crops = risk_inputs.crops
+    R = (params.loc[crops, "yield_qtl_ha"] * params.loc[crops, "price"]).to_numpy(dtype=float)
+    cost = params.loc[crops, "cost_ha"].to_numpy(dtype=float)
+
+    r1 = evaluate(x1, params, scen)
+    x2, _ = solve_lp_profit_max(scen, params)
+    x3 = same_profit_min_water(params, scen, min_profit=r1["profit"])
+    x4, _, _, _ = nsga2_recommended(params, scen, seed=42)
+
+    for name, x in [("B1", x1), ("B2", x2), ("B3", x3), ("OURS", x4)]:
+        assert x is not None, name
+        det_profit = float(x @ (R - cost))
+        hs = historical_scenarios(x, risk_inputs, R, cost)
+        assert hs["n_years"] >= 3, name
+        pct_diff = abs(hs["mean"] - det_profit) / abs(det_profit) * 100
+        assert pct_diff <= 2.0, f"{name}: scenario mean {hs['mean']:.0f} vs deterministic {det_profit:.0f} ({pct_diff:.2f}% off)"
+
+
+def test_historical_scenarios_returns_n_years_rows(params, risk_inputs):
+    crops = risk_inputs.crops
+    x = np.zeros(len(crops))
+    x[crops.index("rice")] = 3.0
+    x[crops.index("maize")] = 2.0
+    R = (params.loc[crops, "yield_qtl_ha"] * params.loc[crops, "price"]).to_numpy()
+    cost = params.loc[crops, "cost_ha"].to_numpy()
+
+    from agriopt.optim.risk import historical_scenarios
+
+    result, series = historical_scenarios(x, risk_inputs, R, cost, return_series=True)
+    assert len(series) == result["n_years"]
+    assert result["n_years"] > 0
+    assert result["worst_year"] in series.index
+    assert series[result["worst_year"]] == pytest.approx(result["worst_year_profit"])
+
+
+def test_historical_scenarios_deterministic(params, risk_inputs):
+    from agriopt.optim.risk import historical_scenarios
+
+    crops = risk_inputs.crops
+    x = np.zeros(len(crops))
+    x[crops.index("rice")] = 3.0
+    R = (params.loc[crops, "yield_qtl_ha"] * params.loc[crops, "price"]).to_numpy()
+    cost = params.loc[crops, "cost_ha"].to_numpy()
+
+    r1 = historical_scenarios(x, risk_inputs, R, cost)
+    r2 = historical_scenarios(x, risk_inputs, R, cost)
+    assert r1 == r2
+
+
+def test_historical_scenarios_zero_allocation_is_zero(params, risk_inputs):
+    from agriopt.optim.risk import historical_scenarios
+
+    crops = risk_inputs.crops
+    x = np.zeros(len(crops))
+    R = (params.loc[crops, "yield_qtl_ha"] * params.loc[crops, "price"]).to_numpy()
+    cost = params.loc[crops, "cost_ha"].to_numpy()
+    r = historical_scenarios(x, risk_inputs, R, cost)
+    assert r["mean"] == 0.0
+    assert r["n_loss_years"] == 0
+
+
+# --- bootstrap_profit_resampled (optional, exploratory only) -------------------
+
+
+def test_bootstrap_resampled_deterministic_with_seed(params, risk_inputs):
+    from agriopt.optim.risk import bootstrap_profit_resampled
 
     crops = risk_inputs.crops
     x = np.zeros(len(crops))
@@ -89,21 +169,9 @@ def test_bootstrap_deterministic_with_seed(params, risk_inputs):
     R = (params.loc[crops, "yield_qtl_ha"] * params.loc[crops, "price"]).to_numpy()
     cost = params.loc[crops, "cost_ha"].to_numpy()
 
-    r1 = bootstrap_profit(x, risk_inputs, R, cost, n=500, seed=7)
-    r2 = bootstrap_profit(x, risk_inputs, R, cost, n=500, seed=7)
+    r1 = bootstrap_profit_resampled(x, risk_inputs, R, cost, n=500, seed=7)
+    r2 = bootstrap_profit_resampled(x, risk_inputs, R, cost, n=500, seed=7)
     assert r1 == r2
-
-
-def test_bootstrap_zero_allocation_is_zero(params, risk_inputs):
-    from agriopt.optim.risk import bootstrap_profit
-
-    crops = risk_inputs.crops
-    x = np.zeros(len(crops))
-    R = (params.loc[crops, "yield_qtl_ha"] * params.loc[crops, "price"]).to_numpy()
-    cost = params.loc[crops, "cost_ha"].to_numpy()
-    r = bootstrap_profit(x, risk_inputs, R, cost, n=100, seed=1)
-    assert r["mean"] == 0.0
-    assert r["P_loss"] == 0.0
 
 
 # --- NSGA-III (Model B) -------------------------------------------------------
@@ -154,7 +222,7 @@ def test_exact_front_lp_grid_is_nondominated(params, scenario):
         assert not dominators.any(), f"point {i} is dominated by another point in the returned front"
 
 
-# --- ablation (Experiment 4) ---------------------------------------------------
+# --- ablation (Experiment 4, Phase 5.1) -----------------------------------------
 
 
 def test_ablation_full_variant_has_zero_loss_vs_itself(params):
@@ -162,7 +230,7 @@ def test_ablation_full_variant_has_zero_loss_vs_itself(params):
     scenario = Scenario(water_budget_m3=ablation.compute_b1_water(params, land_ha=ablation.LAND_HA) * 0.7, land_ha=ablation.LAND_HA)
 
     full_decisions = ablation.decide(params, scenario)
-    for strategy in ["OURS", "B2"]:
+    for strategy in ["OURS", "B2", "B3"]:
         x_full_ref = full_decisions[strategy]
         assert x_full_ref is not None
         r_eval = ablation.evaluate(x_full_ref, params, scenario)
@@ -171,3 +239,24 @@ def test_ablation_full_variant_has_zero_loss_vs_itself(params):
         l1_dist = float(np.abs(x_full_ref - x_full_ref).sum())
         assert loss_pct == pytest.approx(0.0, abs=1e-6)
         assert l1_dist == pytest.approx(0.0, abs=1e-9)
+
+
+def test_ablation_b2_loss_nonnegative_for_all_variants(params):
+    """The exact profit-max LP (B2) shares an identical feasible region
+    across all variants (only the profit objective's coefficients change),
+    so the FULL decision is the true profit-max under FULL params -- any
+    other variant's B2 decision, evaluated under FULL params, can only do
+    as well or worse. _lp_strategy_row asserts this internally; this test
+    checks it explicitly across every variant."""
+    ablation = _load_ablation_module()
+    scenario = Scenario(water_budget_m3=ablation.compute_b1_water(params, land_ha=ablation.LAND_HA) * 0.7, land_ha=ablation.LAND_HA)
+
+    full_params = params
+    variant_params = {name: builder(full_params) for name, builder in ablation.VARIANTS.items()}
+    full_decisions = ablation.decide(variant_params["FULL"], scenario)
+
+    for variant_name, params_variant in variant_params.items():
+        decisions = ablation.decide(params_variant, scenario) if variant_name != "FULL" else full_decisions
+        row = ablation._lp_strategy_row(variant_name, "test", "B2", decisions["B2"], full_decisions["B2"], full_params, scenario)
+        assert row["feasible"]
+        assert row["profit_loss_rs_vs_full"] >= -1e-3 * max(1.0, abs(row["profit_under_full"])), variant_name
