@@ -58,6 +58,20 @@ see `admin_price_rs_per_qtl` in `data/reference/crop_reference.csv`.
 
 Audit reports and plots land in `reports/eda/`.
 
+## Run the demo
+
+The app reads a precomputed crop-params cache instead of loading the ~528 MB
+yield model at startup. Build the cache once (and any time
+`crop_reference.csv` or the yield/price models change), then run the app:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+python scripts\40_build_cache.py
+streamlit run app\streamlit_app.py
+```
+
+Headless smoke test (no browser): `python scripts\smoke_e2e.py`
+
 ## Tests
 
 ```powershell
@@ -66,12 +80,12 @@ pytest -q
 
 ## Layout
 
-- `src/agriopt/` — importable package (config, data loaders/cleaners, CEDA client)
-- `scripts/` — one-off download/fetch/audit scripts
+- `src/agriopt/` — importable package (config, data loaders/cleaners, CEDA client, models, optimizer)
+- `scripts/` — one-off download/fetch/audit/train scripts, plus `40_build_cache.py` (app cache) and `smoke_e2e.py` (headless demo smoke test)
 - `data/raw/` — downloaded, gitignored
 - `data/raw/prices_ceda/` — cached raw CEDA API responses, gitignored
-- `data/processed/` — cleaned parquet, gitignored
+- `data/processed/` — cleaned parquet + `crop_params_cache.json` (app's only data input), gitignored
 - `data/reference/` — hand-curated reference tables, committed
 - `docs/formulation.md` — optimization problem formulation
 - `docs/units.md` — Yield -> quintals-of-marketed-product unit conversions
-- `app/streamlit_app.py` — UI placeholder
+- `app/streamlit_app.py` — Streamlit demo entry point; `app/pipeline.py`/`app/data.py` hold non-UI logic; `app/components/` holds per-tab UI
