@@ -1,10 +1,14 @@
-"""Tab 1: Recommendation -- KPI cards, allocation table + bar, plain-language summary."""
+"""Tab 1: Recommendation -- KPI cards, allocation table + bar, plain-language
+summary, "why these crops?" explanations, binding constraints, downloads."""
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from app.explain import binding_constraints, crop_reasons
+from app.exports import build_plan_csv, build_summary_markdown
 from app.pipeline import ScenarioResult, pct_delta, summary_sentence
 
 SEASON_LABELS = {"kharif": "Kharif", "rabi": "Rabi"}
@@ -61,5 +65,39 @@ def render_recommendation_tab(result: ScenarioResult, params_df: pd.DataFrame) -
         st.dataframe(
             alloc_df.rename(columns={"hectares": "ha"})[["crop", "ha", "season"]].sort_values("ha", ascending=False),
             hide_index=True,
+            width="stretch",
+        )
+
+    with st.expander("Why these crops?", expanded=False):
+        Sigma = result.Sigma if result.risk_aware else None
+        reasons = crop_reasons(x4, params_df, result.scenario, Sigma=Sigma)
+        for crop in crops:
+            if crop in reasons:
+                st.markdown(f"**{crop}** — {reasons[crop]}")
+        if Sigma is None:
+            st.caption("Enable risk-aware mode to see each crop's share of total portfolio risk.")
+
+        st.markdown("**Binding constraints**")
+        binding_df = pd.DataFrame(binding_constraints(x4, params_df, result.scenario))
+        binding_df["used"] = binding_df["used"].round(1)
+        binding_df["limit"] = binding_df["limit"].round(1)
+        st.dataframe(binding_df, hide_index=True, width="stretch")
+
+    st.subheader("Download")
+    dl_col1, dl_col2 = st.columns(2)
+    with dl_col1:
+        st.download_button(
+            "Download plan (CSV)",
+            data=build_plan_csv(x4, params_df),
+            file_name="agriopt_plan.csv",
+            mime="text/csv",
+            width="stretch",
+        )
+    with dl_col2:
+        st.download_button(
+            "Download summary (Markdown)",
+            data=build_summary_markdown(result, params_df),
+            file_name="agriopt_summary.md",
+            mime="text/markdown",
             width="stretch",
         )

@@ -7,6 +7,9 @@ import streamlit as st
 from agriopt.config import CROP_REFERENCE_CSV, REPO_ROOT
 
 SHAP_IMAGE = REPO_ROOT / "reports" / "results" / "shap_summary_xgb.png"
+RISK_HEATMAP_IMAGE = REPO_ROOT / "reports" / "results" / "risk_correlation_heatmap.png"
+ABLATION_CSV = REPO_ROOT / "reports" / "results" / "ablation_decisions.csv"
+FRONT_QUALITY_V2_CSV = REPO_ROOT / "reports" / "results" / "optim_front_quality_v2.csv"
 
 
 def _source_label(row: pd.Series) -> str:
@@ -60,6 +63,25 @@ def render_evidence_tab(params_df: pd.DataFrame, yield_meta: dict, price_meta: d
         st.image(str(SHAP_IMAGE), width="stretch")
     else:
         st.caption(f"SHAP summary image not found at {SHAP_IMAGE}")
+
+    st.subheader("Risk model (Phase 5)")
+    if RISK_HEATMAP_IMAGE.exists():
+        st.image(str(RISK_HEATMAP_IMAGE), width="stretch", caption="Relative-deviation correlation across crops (detrended revenue/ha)")
+    else:
+        st.caption(f"Risk correlation heatmap not found at {RISK_HEATMAP_IMAGE}")
+
+    st.markdown("**NSGA-II vs LP reference front quality (v2 grid front)**")
+    if FRONT_QUALITY_V2_CSV.exists():
+        st.dataframe(pd.read_csv(FRONT_QUALITY_V2_CSV), hide_index=True, width="stretch")
+    else:
+        st.caption(f"{FRONT_QUALITY_V2_CSV.name} not found -- run scripts/31_run_risk.py.")
+
+    st.markdown("**Information ablation (Experiment 4)**")
+    if ABLATION_CSV.exists():
+        st.dataframe(pd.read_csv(ABLATION_CSV), hide_index=True, width="stretch")
+        st.caption("B2/B3 rows: profit loss vs the FULL-information decision. OURS rows: dominance + deltas vs FULL (see reports/results/ablation_decisions.md).")
+    else:
+        st.caption(f"{ABLATION_CSV.name} not found -- run scripts/50_ablation.py.")
 
     st.subheader("Data sources")
     st.markdown(
