@@ -32,6 +32,10 @@ YIELD_CLEAN_PARQUET = DATA_PROCESSED / "yield_clean.parquet"
 PRICES_MONTHLY_PARQUET = DATA_PROCESSED / "prices_monthly.parquet"
 
 CROP_REFERENCE_CSV = DATA_REFERENCE / "crop_reference.csv"
+# Phase 7: web-researched historical MSP/FRP (+ CACP A2+FL cost where published)
+# per crop-year, 2015-2025 -- see docs/backtest.md for sourcing methodology.
+MSP_HISTORY_CSV = DATA_REFERENCE / "msp_history.csv"
+BACKTEST_MODELS_DIR = MODELS_DIR / "backtest"
 
 YIELD_MODEL_PATH = MODELS_DIR / "yield_best.joblib"
 YIELD_MODEL_METADATA_PATH = MODELS_DIR / "yield_best.json"
