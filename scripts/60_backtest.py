@@ -86,9 +86,17 @@ def run_year(t: int) -> tuple[list[dict], dict]:
 
     rows = []
     oracle_feasible = len(missing_realized) < len(CROPS)
+    # Phase 7.1 (scripts/61_backtest_v2.py) reuses these already-solved
+    # allocations for fairness/water-matched-oracle/decomposition analysis
+    # rather than resolving NSGA-II/NSGA-III a second time -- purely
+    # additive, does not change any row/summary/plot this script itself
+    # writes below.
+    x_store: dict[str, dict[str, np.ndarray | None]] = {}
+    scenario_store: dict[str, Scenario] = {}
 
     for label, mult in WATER_MULTIPLIERS.items():
         scenario = Scenario(water_budget_m3=b1_water_probe * mult, land_ha=LAND_HA, food_share_min=FOOD_SHARE_MIN, max_share=MAX_SHARE)
+        scenario_store[label] = scenario
 
         x1 = current_mix_leakfree(forecast_params, scenario, t)
         r1 = evaluate(x1, forecast_params, scenario)
@@ -99,6 +107,7 @@ def run_year(t: int) -> tuple[list[dict], dict]:
         x_modelb, _, _, _ = nsga3_recommended(forecast_params, scenario, risk_inputs.Sigma, weights=MODEL_B_WEIGHTS, seed=SEED)
 
         strategies = {"B1": x1, "B2": x2, "B3": x3, "OURS": x_ours, "MODEL_B": x_modelb}
+        x_store[label] = dict(strategies)
         for name, x in strategies.items():
             if x is None:
                 rows.append({"year": t, "scenario": label, "strategy": name, "feasible": False, "planned_profit": np.nan,
@@ -119,6 +128,7 @@ def run_year(t: int) -> tuple[list[dict], dict]:
         if oracle_feasible:
             x_oracle, _ = solve_lp_profit_max(scenario, realized_params)
             r_oracle = evaluate(x_oracle, realized_params, scenario)
+            x_store[label]["ORACLE"] = x_oracle
             rows.append({
                 "year": t, "scenario": label, "strategy": "ORACLE",
                 "planned_profit": r_oracle["profit"], "realized_profit": r_oracle["profit"],
@@ -126,11 +136,20 @@ def run_year(t: int) -> tuple[list[dict], dict]:
                 "feasible": r_oracle["feasible"], "forecast_error": 0.0, "missing_realized_crops": "",
             })
         else:
+            x_store[label]["ORACLE"] = None
             rows.append({"year": t, "scenario": label, "strategy": "ORACLE", "feasible": False, "planned_profit": np.nan,
                          "realized_profit": np.nan, "water_m3": np.nan, "fert_kg": np.nan, "forecast_error": np.nan,
                          "missing_realized_crops": ";".join(missing_realized)})
 
-    return rows, {"missing_realized": missing_realized, "b1_water_probe": b1_water_probe, "forecast_info": finfo}
+    return rows, {
+        "missing_realized": missing_realized,
+        "b1_water_probe": b1_water_probe,
+        "forecast_info": finfo,
+        "forecast_params": forecast_params,
+        "realized_params": realized_params,
+        "x_store": x_store,
+        "scenario_store": scenario_store,
+    }
 
 
 def build_summary(df: pd.DataFrame) -> pd.DataFrame:
