@@ -20,6 +20,7 @@ from agriopt.models.yield_model import (
     load_model,
     load_model_frame,
     predict_yield,
+    predict_yield_interval,
     train_test_split_by_year,
 )
 
@@ -82,3 +83,18 @@ def test_baselines_predict_for_every_maharashtra_test_row():
         preds = model.predict(mh_test)
         assert len(preds) == len(mh_test)
         assert np.all(np.isfinite(preds))
+
+
+def test_predict_yield_interval_brackets_the_point_prediction():
+    """Phase 9: split-conformal interval must be finite, and must bracket
+    the point prediction it's centered on (lower <= pred <= upper)."""
+    for crop in CROPS:
+        r = predict_yield_interval(crop, season="Kharif", state=STATE, year=2018, rainfall_mm=1000.0)
+        assert np.isfinite(r["lower"]) and np.isfinite(r["upper"]) and np.isfinite(r["pred_yield"])
+        assert r["lower"] <= r["pred_yield"] <= r["upper"]
+        assert r["level"] == pytest.approx(0.9)
+
+
+def test_predict_yield_interval_rejects_uncalibrated_alpha():
+    with pytest.raises(NotImplementedError):
+        predict_yield_interval("rice", season="Kharif", state=STATE, year=2018, rainfall_mm=1000.0, alpha=0.5)

@@ -1,0 +1,49 @@
+horizon,scope,crop,comparison,n,dm_stat,p_value,verdict
+3,pooled,ALL,Naive vs XGBoost,315,-1.911494009261442,0.056851255195880857,No significant difference between Naive and XGBoost at h=3 (p=0.057).
+3,per_crop,rice,Naive vs XGBoost,45,-1.6845837649749245,0.09915056638624886,No significant difference between Naive and XGBoost at h=3 (p=0.099).
+3,per_crop,wheat,Naive vs XGBoost,45,-1.9031472633895539,0.06357654351232123,No significant difference between Naive and XGBoost at h=3 (p=0.064).
+3,per_crop,jowar,Naive vs XGBoost,45,-1.804443539070441,0.07800923019238937,No significant difference between Naive and XGBoost at h=3 (p=0.078).
+3,per_crop,soybean,Naive vs XGBoost,45,-0.8956677162852884,0.3753042873797312,No significant difference between Naive and XGBoost at h=3 (p=0.375).
+3,per_crop,cotton,Naive vs XGBoost,45,-1.1686366397488577,0.24884286790567156,No significant difference between Naive and XGBoost at h=3 (p=0.249).
+3,per_crop,tur,Naive vs XGBoost,45,-0.6377667474776018,0.5269307639957659,No significant difference between Naive and XGBoost at h=3 (p=0.527).
+3,per_crop,maize,Naive vs XGBoost,45,0.36579566114102846,0.7162703964139294,No significant difference between Naive and XGBoost at h=3 (p=0.716).
+3,pooled,ALL,Naive vs Seasonal-Naive,315,-4.730607948350377,3.3884740147094305e-06,"Naive significantly more accurate than Seasonal-Naive at h=3, p=0.000."
+3,per_crop,rice,Naive vs Seasonal-Naive,45,-1.6139669734771043,0.1136843985786431,No significant difference between Naive and Seasonal-Naive at h=3 (p=0.114).
+3,per_crop,wheat,Naive vs Seasonal-Naive,45,-1.8277075368564366,0.07437950232367085,No significant difference between Naive and Seasonal-Naive at h=3 (p=0.074).
+3,per_crop,jowar,Naive vs Seasonal-Naive,45,-2.755320294329196,0.008497361243274382,"Naive significantly more accurate than Seasonal-Naive at h=3, p=0.008."
+3,per_crop,soybean,Naive vs Seasonal-Naive,45,-3.2002392431038524,0.002548958319738892,"Naive significantly more accurate than Seasonal-Naive at h=3, p=0.003."
+3,per_crop,cotton,Naive vs Seasonal-Naive,45,-2.262720150963739,0.028640907755626,"Naive significantly more accurate than Seasonal-Naive at h=3, p=0.029."
+3,per_crop,tur,Naive vs Seasonal-Naive,45,-2.7219382391751004,0.009264889154616318,"Naive significantly more accurate than Seasonal-Naive at h=3, p=0.009."
+3,per_crop,maize,Naive vs Seasonal-Naive,45,-1.454742137713968,0.15283797660932708,No significant difference between Naive and Seasonal-Naive at h=3 (p=0.153).
+6,pooled,ALL,Naive vs XGBoost,294,-2.1729505773936633,0.030585165121792768,"Naive significantly more accurate than XGBoost at h=6, p=0.031."
+6,per_crop,rice,Naive vs XGBoost,42,-0.6290539176799231,0.5328032128235778,No significant difference between Naive and XGBoost at h=6 (p=0.533).
+6,per_crop,wheat,Naive vs XGBoost,42,-0.47729773237721124,0.6356847110425652,No significant difference between Naive and XGBoost at h=6 (p=0.636).
+6,per_crop,jowar,Naive vs XGBoost,42,-2.3069101413670636,0.026186345408261147,"Naive significantly more accurate than XGBoost at h=6, p=0.026."
+6,per_crop,soybean,Naive vs XGBoost,42,-1.4698268124157947,0.14924124969739694,No significant difference between Naive and XGBoost at h=6 (p=0.149).
+6,per_crop,cotton,Naive vs XGBoost,42,-1.1547344564535147,0.2548852383133262,No significant difference between Naive and XGBoost at h=6 (p=0.255).
+6,per_crop,tur,Naive vs XGBoost,42,-0.9778565807029602,0.33388009916236716,No significant difference between Naive and XGBoost at h=6 (p=0.334).
+6,per_crop,maize,Naive vs XGBoost,42,-1.6221499114797246,0.11243707978020612,No significant difference between Naive and XGBoost at h=6 (p=0.112).
+6,pooled,ALL,Naive vs Seasonal-Naive,294,-3.3519458760519387,0.0009078152711947673,"Naive significantly more accurate than Seasonal-Naive at h=6, p=0.001."
+6,per_crop,rice,Naive vs Seasonal-Naive,42,-1.075173247214131,0.2885838431683039,No significant difference between Naive and Seasonal-Naive at h=6 (p=0.289).
+6,per_crop,wheat,Naive vs Seasonal-Naive,42,-0.5784836239559245,0.5661020009089766,No significant difference between Naive and Seasonal-Naive at h=6 (p=0.566).
+6,per_crop,jowar,Naive vs Seasonal-Naive,42,-1.6502101148248023,0.10654130795749395,No significant difference between Naive and Seasonal-Naive at h=6 (p=0.107).
+6,per_crop,soybean,Naive vs Seasonal-Naive,42,-2.542757694170295,0.014869181727123149,"Naive significantly more accurate than Seasonal-Naive at h=6, p=0.015."
+6,per_crop,cotton,Naive vs Seasonal-Naive,42,-1.7556508954613366,0.08661718175794508,No significant difference between Naive and Seasonal-Naive at h=6 (p=0.087).
+6,per_crop,tur,Naive vs Seasonal-Naive,42,-1.6814724473629068,0.10027444779673056,No significant difference between Naive and Seasonal-Naive at h=6 (p=0.100).
+6,per_crop,maize,Naive vs Seasonal-Naive,42,-1.1709706675733869,0.24837137419235011,No significant difference between Naive and Seasonal-Naive at h=6 (p=0.248).
+12,pooled,ALL,Naive vs XGBoost,252,-2.339825665055404,0.020077168053075356,"Naive significantly more accurate than XGBoost at h=12, p=0.020."
+12,per_crop,rice,Naive vs XGBoost,36,-2.0319777619275556,0.0498006294350839,"Naive significantly more accurate than XGBoost at h=12, p=0.050."
+12,per_crop,wheat,Naive vs XGBoost,36,-2.1469268737924545,0.038807399322829284,"Naive significantly more accurate than XGBoost at h=12, p=0.039."
+12,per_crop,jowar,Naive vs XGBoost,36,0.28497360269616084,0.7773438942239093,No significant difference between Naive and XGBoost at h=12 (p=0.777).
+12,per_crop,soybean,Naive vs XGBoost,36,-0.5299133145343065,0.5995178544873911,No significant difference between Naive and XGBoost at h=12 (p=0.600).
+12,per_crop,cotton,Naive vs XGBoost,36,-3.478503837294306,0.0013678501733405124,"Naive significantly more accurate than XGBoost at h=12, p=0.001."
+12,per_crop,tur,Naive vs XGBoost,36,-0.9223961246818254,0.3626371602476637,No significant difference between Naive and XGBoost at h=12 (p=0.363).
+12,per_crop,maize,Naive vs XGBoost,36,-2.4138413592784445,0.02115376919981471,"Naive significantly more accurate than XGBoost at h=12, p=0.021."
+12,pooled,ALL,Naive vs Seasonal-Naive,252,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,rice,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,wheat,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,jowar,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,soybean,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,cotton,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,tur,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).
+12,per_crop,maize,Naive vs Seasonal-Naive,36,0.0,1.0,No significant difference between Naive and Seasonal-Naive at h=12 (p=1.000).

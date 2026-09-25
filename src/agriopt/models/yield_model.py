@@ -33,6 +33,8 @@ from agriopt.config import (
     TEST_START_YEAR,
     TRAIN_END_YEAR,
     YIELD_CLEAN_PARQUET,
+    YIELD_CONFORMAL_METADATA_PATH,
+    YIELD_CONFORMAL_MODEL_PATH,
     YIELD_MODEL_METADATA_PATH,
     YIELD_MODEL_PATH,
     YIELD_TO_SALEABLE_QTL_PER_HA,
@@ -510,4 +512,98 @@ def expected_yield_saleable(
         "rainfall_mm": rainfall_mm,
         "dataset_yield": dataset_yield,
         "value": saleable_qtl_ha,
+    }
+
+
+# --- Phase 9: split-conformal prediction intervals ---------------------------
+#
+# Calibrated by scripts/92_conformal.py: RandomForest fit on year<=2012,
+# conformal quantile (see agriopt.stats.conformal.conformal_quantile)
+# calibrated on 2013-2015 LOG1P-YIELD absolute residuals (this repo's
+# "log_yield" column is log1p(yield), not plain log -- see
+# load_model_frame() -- so the interval is built in log1p-space and
+# inverted with expm1, not exp; log1p is strictly increasing, same as log,
+# so the coverage-transfer argument is unaffected: expm1(logpred - q) <=
+# actual <= expm1(logpred + q) iff logpred - q <= log1p(actual) <=
+# logpred + q). The calibrated quantile is PERSISTED (models/yield_conformal.json)
+# rather than recomputed per call, since recomputation would mean refitting
+# a RandomForest on every inference call -- far too slow for interactive use
+# (e.g. the Streamlit app). Call scripts/92_conformal.py to (re)calibrate.
+
+
+def load_conformal_model(model_path=YIELD_CONFORMAL_MODEL_PATH):
+    return joblib.load(model_path)
+
+
+def load_conformal_metadata(metadata_path=YIELD_CONFORMAL_METADATA_PATH) -> dict:
+    with open(metadata_path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def predict_yield_interval(
+    crop: str,
+    season: str,
+    state: str,
+    year: int,
+    rainfall_mm: float,
+    alpha: float = 0.1,
+    model=None,
+    conformal_meta: dict | None = None,
+    **optional,
+) -> dict:
+    """Split-conformal (1-alpha) interval for yield (dataset units, t/ha or
+    bales/ha -- see docs/units.md), at the given (crop, season, state, year,
+    rainfall_mm) point.
+
+    Uses the CONFORMAL model (RandomForest fit on year<=2012, quantile
+    calibrated on 2013-2015 residuals -- see scripts/92_conformal.py), NOT
+    the production yield_best model (which is refit on ALL years and has no
+    calibration set left over). `alpha=0.1` (the default, 90% interval) uses
+    the persisted overall quantile unless a per-crop quantile was calibrated
+    and is present in conformal_meta["q_per_crop"] (preferred when
+    available -- narrower/wider per crop rather than one global band).
+
+    Raises if alpha != 0.1 and no matching calibration exists (only alpha=0.1
+    is currently calibrated/persisted -- see scripts/92_conformal.py).
+    """
+    if model is None:
+        model = load_conformal_model()
+    if conformal_meta is None:
+        conformal_meta = load_conformal_metadata()
+
+    if abs(alpha - conformal_meta["alpha"]) > 1e-9:
+        raise NotImplementedError(
+            f"predict_yield_interval: only alpha={conformal_meta['alpha']} is calibrated/persisted "
+            f"(models/yield_conformal.json); got alpha={alpha}. Rerun scripts/92_conformal.py for a "
+            "different alpha."
+        )
+
+    row = pd.DataFrame([{"crop": CANON_TO_YIELD_NAME.get(crop, crop), "season": season, "state": state, "year": year, "rainfall_mm": rainfall_mm}])
+    for col in conformal_meta["num_cols"]:
+        if col not in row.columns:
+            if col in optional:
+                row[col] = optional[col]
+            else:
+                raise ValueError(f"predict_yield_interval: model needs '{col}' but it was not provided")
+
+    log_pred = float(model.pipeline.predict(row[conformal_meta["cat_cols"] + conformal_meta["num_cols"]])[0])
+
+    q_per_crop = conformal_meta.get("q_per_crop", {})
+    q = float(q_per_crop[crop]) if crop in q_per_crop else float(conformal_meta["q_overall"])
+
+    pred_yield = float(np.expm1(log_pred))
+    lower = float(np.expm1(log_pred - q))
+    upper = float(np.expm1(log_pred + q))
+    return {
+        "crop": crop,
+        "season": season,
+        "state": state,
+        "year": year,
+        "rainfall_mm": rainfall_mm,
+        "pred_yield": pred_yield,
+        "lower": lower,
+        "upper": upper,
+        "level": 1.0 - conformal_meta["alpha"],
+        "q_log1p": q,
+        "q_source": "per_crop" if crop in q_per_crop else "overall",
     }

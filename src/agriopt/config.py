@@ -47,6 +47,14 @@ YIELD_MODEL_METADATA_PATH = MODELS_DIR / "yield_best.json"
 YIELD_EVAL_MODEL_PATH = MODELS_DIR / "yield_eval.joblib"
 YIELD_EVAL_METADATA_PATH = MODELS_DIR / "yield_eval.json"
 
+# Phase 9: split-conformal calibration (fit <=2012, calibrate 2013-2015) for
+# predict_yield_interval() -- see agriopt.models.yield_model and
+# scripts/92_conformal.py. Persisted rather than recomputed per call (a
+# fresh recompute would mean refitting a whole RandomForest on every
+# inference call, which is far too slow for interactive use).
+YIELD_CONFORMAL_MODEL_PATH = MODELS_DIR / "yield_conformal.joblib"
+YIELD_CONFORMAL_METADATA_PATH = MODELS_DIR / "yield_conformal.json"
+
 PRICE_MODEL_PATH = MODELS_DIR / "price_best_h12.joblib"
 PRICE_MODEL_METADATA_PATH = MODELS_DIR / "price_best_h12.json"
 

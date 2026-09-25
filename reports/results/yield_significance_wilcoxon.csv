@@ -1,0 +1,4 @@
+comparison,n,mean_abs_err_diff,wilcoxon_stat,p_value,verdict
+RandomForest vs XGBoost,152,-0.14814054088983808,4403.5,0.009471548597883635,RandomForest has significantly lower absolute error than XGBoost (p=0.009).
+RandomForest vs Baseline-Mean,152,-2.160691974313457,5420.0,0.46860884639271416,No significant difference between RandomForest and Baseline-Mean (p=0.469).
+RandomForest vs Ridge,152,-0.8765533413731373,2511.0,1.234432331313704e-09,RandomForest has significantly lower absolute error than Ridge (p=0.000).
