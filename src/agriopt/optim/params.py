@@ -18,7 +18,7 @@ from __future__ import annotations
 import pandas as pd
 
 from agriopt.config import CROPS, MAIN_SEASON
-from agriopt.data.rainfall import net_irrigation_mm
+from agriopt.data.rainfall import REGIONS, net_irrigation_mm
 from agriopt.data.reference import cost_rs_per_ha, fert_total_kg_ha, load_reference, water_mm
 from agriopt.models.price_model import expected_price, load_price_frame
 from agriopt.models.yield_model import expected_yield_saleable
@@ -64,6 +64,7 @@ def build_crop_params(
     verbose: bool = True,
     water_basis: str = "total_need",
     rainfall_scenario: str = "normal",
+    region: str = "maharashtra",
 ) -> pd.DataFrame:
     """One row per crop: yield_qtl_ha, price, cost_ha, profit_ha,
     water_m3_ha, fert_kg_ha, seasons_occupied (set of {"kharif","rabi"}),
@@ -73,10 +74,15 @@ def build_crop_params(
     requirement (water_mm(), unchanged from Phase 1-7 -- every existing
     caller reproduces byte-for-byte). water_basis="net_irrigation" (Phase 8)
     instead uses agriopt.data.rainfall.net_irrigation_mm(crop,
-    rainfall_scenario), i.e. total need minus effective season rainfall --
-    see docs/water.md."""
+    rainfall_scenario, region=region), i.e. total need minus effective
+    season rainfall -- see docs/water.md. `region` (Phase 8.1,
+    agriopt.data.rainfall.REGIONS) selects WHICH region's own rainfall is
+    used, when water_basis="net_irrigation" -- default "maharashtra" (the
+    area-weighted state-wide average) reproduces every existing caller's
+    behavior unchanged."""
     assert price_mode in ("market", "msp_floor"), price_mode
     assert water_basis in ("total_need", "net_irrigation"), water_basis
+    assert region in REGIONS, region
 
     ref = load_reference()
     price_frame = load_price_frame()
@@ -100,7 +106,7 @@ def build_crop_params(
         profit_ha = yield_qtl_ha * price - cost_ha
 
         if water_basis == "net_irrigation":
-            water_m3_ha = net_irrigation_mm(crop, rainfall_scenario, ref) * MM_TO_M3_PER_HA
+            water_m3_ha = net_irrigation_mm(crop, rainfall_scenario, ref, region) * MM_TO_M3_PER_HA
         else:
             water_m3_ha = water_mm(crop, ref) * MM_TO_M3_PER_HA
         fert_kg_ha = fert_total_kg_ha(crop, ref)

@@ -37,19 +37,22 @@ subdivisions, with complete (no missing years/months) monthly data
   breakdown of Maharashtra).
 - `VIDARBHA`
 
-## 2. Maharashtra monthly rainfall (ASSUMPTION: unweighted mean)
+## 2. Maharashtra monthly rainfall (Phase 8.1: AREA-WEIGHTED mean)
 
-Maharashtra's monthly rainfall = the **unweighted arithmetic mean** across
-the 4 subdivisions, computed per year first (so each year's Maharashtra
-value is itself an average of that year's 4 subdivision values), then
-averaged/percentiled across years. Area-weighting the 4 subdivisions (by
-their true geographic or agricultural area) would be more precise, but
-per-subdivision areas are **not** included in this dataset or any
-accompanying metadata -- rather than guess or hardcode areas from an outside
-memory, this uses the plain unweighted mean and flags it here as an
-ASSUMPTION. (Maharashtra's 4 IMD subdivisions are, in fact, roughly
-comparable in area, so this is not expected to be a large source of error,
-but it has not been checked against an authoritative area source.)
+**Superseded by Phase 8.1** (see section 8 below) -- Maharashtra's monthly
+rainfall is now the **area-weighted mean** across the 4 subdivisions (weight
+= each subdivision's official area / their total area, `agriopt.data.rainfall.area_weights()`),
+computed per year first (so each year's Maharashtra value is itself a
+weighted average of that year's 4 subdivision values), then
+averaged/percentiled across years. Phase 8 originally used a plain
+unweighted mean here, flagged as an ASSUMPTION because per-subdivision areas
+were not readily available; Phase 8.1 found a citable official source for
+those areas (IITM, see section 8.1) and switched to area-weighting. **This
+changes the computed Maharashtra state-wide rainfall figures from Phase 8's
+committed numbers** -- see section 8.4 for the exact before/after delta.
+Maharashtra's 4 IMD subdivisions are, in fact, quite different in area
+(Madhya Maharashtra at 115,306 sq km is nearly 3.4x Konkan & Goa's 34,095 sq
+km), so this was NOT a negligible correction -- see section 8.4.
 
 ## 3. Monthly normals and dry-year values
 
@@ -129,7 +132,7 @@ sum of that crop's season-window months' effective rainfall (`scenario` =
 `"normal"` uses the 30-year monthly normals, `"dry"` uses the 20th-percentile
 year). See `agriopt.data.rainfall.net_irrigation_mm()`.
 
-### Results table (`agriopt.data.rainfall.rainfall_water_table()`)
+### Results table (`agriopt.data.rainfall.rainfall_water_table()`) -- ORIGINAL Phase 8 numbers (unweighted mean, no rice puddling adjustment)
 
 | crop | water need (mm) | Peff normal (mm) | net irrigation normal (mm) | net irrigation dry (mm) |
 |---|---|---|---|---|
@@ -142,7 +145,10 @@ year). See `agriopt.data.rainfall.net_irrigation_mm()`.
 | tur | 400.0 | 720.2 | 0.0 | 0.0 |
 | maize | 650.0 | 695.6 | 0.0 | 35.3 |
 
-(Regenerate with `python -c "from agriopt.data.rainfall import rainfall_water_table; from agriopt.config import CROPS; print(rainfall_water_table(CROPS).round(1))"`.)
+**Superseded by Phase 8.1** -- see section 8.4 for the current (area-weighted
++ rice puddling adjustment) numbers, region="maharashtra". The findings below
+describe the ORIGINAL Phase 8 (unweighted) numbers; section 8.4 covers what
+changed and why the qualitative conclusions still hold.
 
 **What the numbers actually show** (checked, not assumed):
 
@@ -195,3 +201,182 @@ byte-for-byte identical `water_m3_ha` values to every prior phase** -- see
 See `reports/results/water_basis_comparison.md` for the full before/after
 comparison (strategies, backtest) once the optimizer and backtest are rerun
 under `water_basis="net_irrigation"`.
+
+## 8. Phase 8.1: area-weighted rainfall, rice puddling caveat, per-region water basis
+
+Phase 8.1 addressed three gaps Phase 8 had explicitly flagged as
+ASSUMPTIONs/LIMITATIONs: the unweighted Maharashtra mean, the missing rice
+puddling-water caveat, and the state-wide-only rainfall (no way to ask for a
+single subdivision's own numbers).
+
+### 8.1 Area-weighting the Maharashtra average (found + cited)
+
+**Outcome: a citable, authoritative area figure WAS found** (this was
+explicitly allowed to be a "keep the unweighted mean, documented as a
+limitation" outcome if not found -- it was found).
+
+**Source**: IITM (Indian Institute of Tropical Meteorology, Pune -- an
+autonomous institute under India's Ministry of Earth Sciences; PRIMARY data
+source stated as IMD), "IITM Indian regional/subdivisional Monthly Rainfall
+data set" (IITM-IMR), metadata file `iitm-subdivrf.txt`:
+`https://www.tropmet.res.in/data/data-archival/rain/iitm-subdivrf.txt`
+(landing page `https://www.tropmet.res.in/static_pages.php?page_id=53`,
+format documented in `https://www.tropmet.res.in/data/data-archival/rain/Readme.pdf`,
+which states each subdivision header record contains "Numerical Code of the
+subdivision; Name of the subdivision; Area of the subdivision in sq.km.;
+Percentage of the area out of the total area of the country; ...").
+
+Verbatim header lines fetched from that file:
+
+```
+146 23.KONKAN AND GOA         SUBDIVISION  Area   34095 SQ.KM 1.18 PER   5 STN
+146 24.MADHYA MAHARASHTRA     SUBDIVISION  Area  115306 SQ.KM 4.00 PER   9 STN
+146 25.MARATHWADA             SUBDIVISION  Area   64525 SQ.KM 2.24 PER   5 STN
+146 26.VIDARBHA               SUBDIVISION  Area   97536 SQ.KM 3.39 PER   8 STN
+```
+
+("MARATHWADA" is this source's own spelling; it is the same subdivision as
+the Kaggle rainfall dataset's "MATATHWADA" -- see the module docstring on
+that spelling.) Sum = 311,462 sq km. Cross-check: Maharashtra's actual state
+area is ~307,713 sq km (well-known figure) -- the IITM sum is close to but
+slightly above this, consistent with "Konkan & Goa" genuinely including
+Goa's own ~3,702 sq km (i.e. these are real subdivision-boundary areas, not
+an unrelated/incompatible figure that happens to be in the right order of
+magnitude).
+
+**What was explicitly rejected as NOT sufficiently citable**: Maharashtra's
+6 "revenue divisions" (Konkan, Pune, Nashik, Aurangabad, Amravati, Nagpur --
+an administrative, not meteorological, partition) turned up area figures
+more easily in general web search, but their boundaries do not cleanly map
+1:1 onto the 4 IMD meteorological subdivisions (e.g. "Vidarbha" = Amravati +
+Nagpur divisions combined; "Konkan" division excludes Goa, whereas IMD's
+"Konkan & Goa" subdivision includes it) -- using revenue-division areas as a
+stand-in for IMD subdivision areas would have been exactly the kind of
+unverified proxy the task brief warned against, so they were not used.
+
+Area weights (`agriopt.data.rainfall.area_weights()`), area / total:
+
+| subdivision | area (sq km) | weight |
+|---|---|---|
+| Konkan & Goa | 34,095 | 0.1095 |
+| Madhya Maharashtra | 115,306 | 0.3702 |
+| Marathwada | 64,525 | 0.2072 |
+| Vidarbha | 97,536 | 0.3131 |
+
+`_regional_yearly()` (`agriopt.data.rainfall`) now computes the
+"maharashtra" region's per-year monthly rainfall as this weighted
+combination, replacing Phase 8's `groupby("YEAR")[MONTH_COLS].mean()`
+(equal 25%-each weighting).
+
+### 8.2 Rice puddling water (found + cited, partial)
+
+FAO's Irrigation Water Management Training Manual No. 3, Chapter 4
+"Determination of the Irrigation Schedule for Paddy Rice"
+(`https://www.fao.org/4/t7202e/t7202e07.htm`) gives the standing-water
+irrigation balance for puddled/transplanted rice as:
+
+```
+IN = ET_crop + SAT + PERC + WL - Peff
+```
+
+- **SAT** ("the amount of water needed to saturate the root zone") **= 200
+  mm** -- a one-time, pre-season land-preparation/puddling requirement,
+  relatively soil-independent. **Used as `RICE_EXTRA_MM = 200.0`** in
+  `agriopt.data.rainfall.net_irrigation_mm()`, added ONLY for `crop="rice"`,
+  ONLY inside `net_irrigation_mm()` (i.e. only the `water_basis="net_irrigation"`
+  path) -- `water_mm()`/the `"total_need"` basis is completely unchanged, so
+  no Phase 1-8 `total_need`-basis output is affected.
+- **PERC** (percolation/seepage) **= 2-8 mm/day depending on soil type**
+  (60-240 mm/month) -- explicitly NOT reduced to a single point figure and
+  NOT added here: it is highly soil-type dependent, and this repo has no
+  per-field/per-region soil-type data to justify picking one value over
+  another (documented LIMITATION, not a blocker, per the task brief's
+  explicit allowance for this exact situation).
+- **WL** (standing water layer, 20-100mm) -- also not added, for the same
+  reason (it is closer to an ongoing operational choice than a fixed
+  physical requirement, and interacts with PERC in ways this repo cannot
+  quantify without soil data).
+
+So `RICE_EXTRA_MM` captures the land-preparation component only, not the
+full puddled-rice water burden -- a partial, explicitly-scoped fix, not a
+claim that rice's net irrigation figure is now "complete."
+
+### 8.3 `region` parameter (Scenario.region / REGIONS)
+
+`agriopt.data.rainfall.REGIONS = ("maharashtra", "konkan",
+"madhya_maharashtra", "marathwada", "vidarbha")`. `monthly_normals()`,
+`monthly_dry_year()`, `effective_rainfall_monthly()`,
+`season_effective_rainfall_mm()`, `net_irrigation_mm()`, and
+`rainfall_water_table()` all gained a `region` parameter (default
+`"maharashtra"`, unchanged behavior for every existing caller that doesn't
+pass it). `"maharashtra"` uses the area-weighted combination (8.1); any
+other region key uses that single IMD subdivision's own rainfall directly
+(no weighting -- REGION_TO_SUBDIVISION maps the key to the dataset's own
+SUBDIVISION string).
+
+`agriopt.optim.problem.Scenario` gained `region: str = "maharashtra"`.
+`agriopt.optim.params.build_crop_params()` gained a matching `region`
+parameter, used only when `water_basis="net_irrigation"`.
+`agriopt.optim.solvers.solve_nsga2/solve_lp_profit_max/solve_lp_eps/exact_front_lp`
+now also pass `scenario.region` through when building their own
+`params_df`. `agriopt.backtest.info.build_forecast_params_df`/
+`build_realized_params_df` gained the same `region` parameter, for
+consistency with the existing `water_basis`/`rainfall_scenario` threading
+pattern (this phase does NOT rerun the backtest per-region -- see
+`reports/results/region_comparison.md`, which reruns only the E3 strategies
+table for `marathwada`/`konkan`).
+
+### 8.4 Net effect: does the "maharashtra" default change from Phase 8's numbers?
+
+**Yes.** Area-weighting is NOT a small correction here: Madhya Maharashtra
+(37.0% weight) and Vidarbha (31.3%) are comparatively dry, while Konkan &
+Goa (10.9% weight, but the wettest subdivision by far) previously counted
+equally (25%) under the unweighted mean. Net effect: the area-weighted
+monsoon-month rainfall is noticeably LOWER than the old unweighted figure
+(e.g. June normal: 295.0mm unweighted -> 223.6mm area-weighted; July:
+450.2mm -> 343.8mm), because the wettest subdivision (Konkan) is
+underweighted relative to its old 25% share.
+
+`rainfall_water_table(CROPS, region="maharashtra")` now (area-weighted +
+`RICE_EXTRA_MM`):
+
+| crop | water need (mm) | Peff normal (mm) | net irrigation normal (mm) | net irrigation dry (mm) |
+|---|---|---|---|---|
+| rice | 575.0 | 650.5 | 200.0 | 212.5 |
+| wheat | 550.0 | 35.6 | 514.4 | 546.4 |
+| jowar | 550.0 | 35.6 | 514.4 | 546.4 |
+| soybean | 575.0 | 650.5 | 0.0 | 12.5 |
+| cotton | 1000.0 | 675.6 | 324.4 | 434.8 |
+| sugarcane | 2000.0 | 707.5 | 1292.5 | 1427.0 |
+| tur | 400.0 | 675.6 | 0.0 | 0.0 |
+| maize | 650.0 | 650.5 | 0.0 | 87.5 |
+
+vs Phase 8's original (unweighted, no rice adjustment) table in section 6.
+Peff normal dropped for every crop (e.g. rice/soybean/maize kharif window:
+695.6 -> 650.5mm; cotton/tur long-kharif: 720.2 -> 675.6mm; rabi
+wheat/jowar: 34.2 -> 35.6mm, essentially unchanged since Nov-Mar rainfall
+barely differs by subdivision). Net irrigation normal/dry rose slightly for
+every crop except rice (whose 0.0 -> 200.0/212.5 jump is dominated by
+`RICE_EXTRA_MM`, not the area-weighting itself -- rice's Peff normal only
+dropped 695.6 -> 650.5, still above its 575mm need, so the area-weighting
+alone would have kept rice's net irrigation at 0.0; the puddling adjustment
+is what moves it off zero).
+
+**Qualitative conclusions from Phase 8's findings (section 6) still hold**:
+kharif/long-kharif rainfed crops remain far cheaper in net-irrigation terms
+than Rabi crops or sugarcane; Rabi crops still see almost no rainfall
+relief; sugarcane's absolute net-irrigation burden is still the largest of
+any crop. The area-weighting shifted magnitudes, not the qualitative
+pattern.
+
+No `tests/test_water_net.py` assertion hardcodes an exact rainfall-derived
+mm figure (all are inequality/structural checks), so this change did not
+require adjusting that file's expected values -- see `tests/test_water_region.py`
+for the new region-specific tests (including a regression check that
+`build_crop_params()`'s DEFAULT `region="maharashtra"` reproduces this
+section's numbers).
+
+### 8.5 Regional net-irrigation table (all 4 regions x 2 scenarios)
+
+See `reports/results/region_comparison.md` for the full 8-crop x 4-region x
+2-scenario table and the E3 strategies rerun for `marathwada`/`konkan`.

@@ -244,10 +244,11 @@ def _base_params_row(
     water_ref: pd.DataFrame,
     water_basis: str = "total_need",
     rainfall_scenario: str = "normal",
+    region: str = "maharashtra",
 ) -> dict:
     profit_ha = yield_qtl_ha * price - cost_ha
     if water_basis == "net_irrigation":
-        water_mm_val = net_irrigation_mm(crop, rainfall_scenario, water_ref)
+        water_mm_val = net_irrigation_mm(crop, rainfall_scenario, water_ref, region)
     else:
         water_mm_val = water_mm(crop, water_ref)
     return {
@@ -268,6 +269,7 @@ def build_forecast_params_df(
     state: str = STATE,
     water_basis: str = "total_need",
     rainfall_scenario: str = "normal",
+    region: str = "maharashtra",
 ) -> tuple[pd.DataFrame, dict]:
     """The full leak-free PLANNING info set for decision year t: refits the
     yield model on year<=t-1, forecasts price naively at the decision month,
@@ -289,7 +291,7 @@ def build_forecast_params_df(
         yield_qtl_ha = yields[crop]["value"]
         price = prices[crop]["value"]
         cost_ha, cost_method = cost_for_year(crop, t, msp_hist, ref)
-        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario)
+        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario, region)
         origin_month = prices[crop]["origin_month"]
         origin = pd.Timestamp(origin_month) if origin_month else pd.Timestamp(year=t, month=DECISION_MONTH[MAIN_SEASON[crop]] if crop != "sugarcane" else 6, day=1)
         row["profit_std_ha"] = yield_qtl_ha * _price_std_leakfree(crop, origin, wide)
@@ -339,6 +341,7 @@ def build_realized_params_df(
     state: str = STATE,
     water_basis: str = "total_need",
     rainfall_scenario: str = "normal",
+    region: str = "maharashtra",
 ) -> tuple[pd.DataFrame, list[str]]:
     """The REALIZED outcome info set for year t: actual Maharashtra yield,
     actual harvest-window mean price, and the same cost_t as planning (cost
@@ -360,7 +363,7 @@ def build_realized_params_df(
             missing.append(crop)
             continue
         cost_ha, _ = cost_for_year(crop, t, msp_hist, ref)
-        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario)
+        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario, region)
         row["profit_std_ha"] = 0.0  # not used for realized evaluation (no forward-looking risk on an outcome)
         rows.append(row)
 

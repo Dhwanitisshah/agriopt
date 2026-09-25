@@ -65,7 +65,11 @@ def solve_nsga2(scenario: Scenario, params_df: pd.DataFrame | None = None, pop: 
     (internally the problem minimizes -profit)."""
     if params_df is None:
         params_df = build_crop_params(
-            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+            scenario.price_mode,
+            verbose=False,
+            water_basis=scenario.water_basis,
+            rainfall_scenario=scenario.rainfall_scenario,
+            region=scenario.region,
         )
     problem = CropAllocationProblem(params_df, scenario)
     algorithm = NSGA2(pop_size=pop)
@@ -90,7 +94,11 @@ def solve_lp_profit_max(scenario: Scenario, params_df: pd.DataFrame | None = Non
     """Returns (x, profit) or (None, None) if infeasible."""
     if params_df is None:
         params_df = build_crop_params(
-            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+            scenario.price_mode,
+            verbose=False,
+            water_basis=scenario.water_basis,
+            rainfall_scenario=scenario.rainfall_scenario,
+            region=scenario.region,
         )
     _, profit, _, _, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
 
@@ -108,7 +116,11 @@ def solve_lp_eps(scenario: Scenario, min_profit: float, params_df: pd.DataFrame 
     constraints. Returns (x, water) or (None, None) if infeasible."""
     if params_df is None:
         params_df = build_crop_params(
-            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+            scenario.price_mode,
+            verbose=False,
+            water_basis=scenario.water_basis,
+            rainfall_scenario=scenario.rainfall_scenario,
+            region=scenario.region,
         )
     _, profit, water, _, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
 
@@ -132,7 +144,11 @@ def exact_front_lp(scenario: Scenario, n: int = 50, params_df: pd.DataFrame | No
     profit positive, same convention as solve_nsga2."""
     if params_df is None:
         params_df = build_crop_params(
-            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+            scenario.price_mode,
+            verbose=False,
+            water_basis=scenario.water_basis,
+            rainfall_scenario=scenario.rainfall_scenario,
+            region=scenario.region,
         )
     crops, profit, water, fert, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
 

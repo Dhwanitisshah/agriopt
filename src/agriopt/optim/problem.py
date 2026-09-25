@@ -35,6 +35,13 @@ class Scenario:
     # Phase 8: which rainfall scenario ("normal" 30-yr mean or "dry" 20th
     # percentile year) net_irrigation_mm() uses, when water_basis="net_irrigation".
     rainfall_scenario: str = "normal"
+    # Phase 8.1: which region's own rainfall net_irrigation_mm() uses, when
+    # water_basis="net_irrigation" -- "maharashtra" (default, area-weighted
+    # state-wide average) or one of the 4 IMD subdivisions: "konkan",
+    # "madhya_maharashtra", "marathwada", "vidarbha" (agriopt.data.rainfall.REGIONS).
+    # MUST default to "maharashtra" so every existing caller/result reproduces
+    # the state-wide-average behavior with no code changes -- see docs/water.md.
+    region: str = "maharashtra"
 
 
 class CropAllocationProblem(Problem):
