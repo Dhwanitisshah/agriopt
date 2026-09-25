@@ -74,9 +74,15 @@ def evaluate_realized_profit(x, forecast_params: pd.DataFrame, realized_params: 
     return float(evaluate(x, realized_full, scenario)["profit"])
 
 
-def run_year(t: int) -> tuple[list[dict], dict]:
-    forecast_params, finfo = build_forecast_params_df(t, crops=CROPS)
-    realized_params, missing_realized = build_realized_params_df(t, crops=CROPS)
+def run_year(t: int, water_basis: str = "total_need", rainfall_scenario: str = "normal") -> tuple[list[dict], dict]:
+    """water_basis/rainfall_scenario (Phase 8): defaults reproduce every
+    pre-Phase-8 result unchanged; water_basis="net_irrigation" threads
+    through to build_forecast_params_df/build_realized_params_df so the
+    whole backtest (B1/B2/B3/OURS/MODEL_B/ORACLE) can be rerun under net
+    irrigation water without any other code path changing -- see
+    scripts/70_water_basis_net.py and reports/results/water_basis_comparison.md."""
+    forecast_params, finfo = build_forecast_params_df(t, crops=CROPS, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
+    realized_params, missing_realized = build_realized_params_df(t, crops=CROPS, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
     R = (forecast_params["yield_qtl_ha"] * forecast_params["price"]).to_numpy(dtype=float)
     risk_inputs = build_risk_inputs_leakfree(t - 1, crops=CROPS, R=R)
 

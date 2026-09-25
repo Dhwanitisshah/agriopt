@@ -367,8 +367,51 @@ def save_model(model, metadata: dict, model_path=YIELD_MODEL_PATH, metadata_path
         json.dump(metadata, f, indent=2, default=str)
 
 
+def _force_single_threaded_predict(model) -> None:
+    """Force n_jobs=1 on any parallel estimator this model wraps.
+
+    ROOT CAUSE (Phase 8 reproducibility investigation): the saved
+    yield_best.joblib model is a SklearnYieldModel wrapping a
+    RandomForestRegressor(n_jobs=-1). sklearn's RandomForest.predict()
+    with n_jobs != 1 aggregates per-tree predictions across threads via
+    joblib.Parallel into a shared accumulator; the ORDER in which threads
+    add their partial sums is scheduled by the OS and is not fixed by
+    `random_state` (random_state only fixes tree structure at fit time,
+    not the runtime accumulation order at predict time). Floating-point
+    addition is not associative, so this makes predict() output differ by
+    ~1e-13 relative between process runs -- exactly the magnitude
+    empirically observed here (verified: calling expected_yield_saleable
+    repeatedly in separate `python -c` subprocesses gave different
+    dataset_yield values at the ~14th significant digit; calling
+    expected_price -- which uses XGBoost, whose prediction is a strictly
+    sequential sum over boosting rounds, not a parallel-reduced sum over
+    trees -- was stable). This tiny per-crop noise in profit_ha then
+    propagates into build_crop_params -> the NSGA-II/III objective
+    evaluation, and (with pymoo's own seeding of numpy.random confirmed
+    fully reproducible in isolation) was the actual source of
+    solve_nsga2/solve_nsga3 non-reproducibility across process runs.
+
+    Forcing n_jobs=1 here makes prediction strictly single-threaded, so
+    there is only one possible accumulation order -- fully reproducible,
+    at a small, one-time model-loading cost (not per-optimizer-generation,
+    so this doesn't slow down the NSGA-II/III loops)."""
+    candidates = [model]
+    candidates.append(getattr(model, "model", None))
+    pipeline = getattr(model, "pipeline", None)
+    if pipeline is not None:
+        candidates.append(pipeline)
+        named_steps = getattr(pipeline, "named_steps", None)
+        if named_steps:
+            candidates.extend(named_steps.values())
+    for obj in candidates:
+        if obj is not None and hasattr(obj, "n_jobs"):
+            obj.n_jobs = 1
+
+
 def load_model(model_path=YIELD_MODEL_PATH):
-    return joblib.load(model_path)
+    model = joblib.load(model_path)
+    _force_single_threaded_predict(model)
+    return model
 
 
 def load_metadata(metadata_path=YIELD_MODEL_METADATA_PATH) -> dict:

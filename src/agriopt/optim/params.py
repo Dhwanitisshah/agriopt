@@ -4,17 +4,21 @@ Reuses the existing yield/price/reference inference APIs (Phase 1/2) --
 no new modeling here, just assembly + unit conversion.
 
 Water caveat (documented per the Phase 3 brief, see also docs/formulation.md):
-water_m3_ha uses the FAO TM3 crop water NEED (total crop water requirement
-over the growing season), not net irrigation requirement (which would
-subtract effective rainfall). This overstates the irrigation water actually
-drawn for rainfed/partially-rainfed crops -- treat WATER_BUDGET_M3 scenarios
-as a total-water-need budget, not a literal irrigation-supply budget.
+water_m3_ha DEFAULTS to the FAO TM3 crop water NEED (total crop water
+requirement over the growing season), not net irrigation requirement (which
+would subtract effective rainfall). This overstates the irrigation water
+actually drawn for rainfed/partially-rainfed crops -- treat WATER_BUDGET_M3
+scenarios as a total-water-need budget, not a literal irrigation-supply
+budget, UNLESS `water_basis="net_irrigation"` is passed (Phase 8 -- see
+docs/water.md and agriopt.data.rainfall), in which case water_m3_ha instead
+uses net irrigation requirement (need minus effective season rainfall).
 """
 from __future__ import annotations
 
 import pandas as pd
 
 from agriopt.config import CROPS, MAIN_SEASON
+from agriopt.data.rainfall import net_irrigation_mm
 from agriopt.data.reference import cost_rs_per_ha, fert_total_kg_ha, load_reference, water_mm
 from agriopt.models.price_model import expected_price, load_price_frame
 from agriopt.models.yield_model import expected_yield_saleable
@@ -54,11 +58,25 @@ def seasons_occupied(crop: str) -> set[str]:
     return {SEASON_MAP[main]}
 
 
-def build_crop_params(price_mode: str = "market", crops: list[str] = CROPS, verbose: bool = True) -> pd.DataFrame:
+def build_crop_params(
+    price_mode: str = "market",
+    crops: list[str] = CROPS,
+    verbose: bool = True,
+    water_basis: str = "total_need",
+    rainfall_scenario: str = "normal",
+) -> pd.DataFrame:
     """One row per crop: yield_qtl_ha, price, cost_ha, profit_ha,
     water_m3_ha, fert_kg_ha, seasons_occupied (set of {"kharif","rabi"}),
-    profit_std_ha. Indexed by crop."""
+    profit_std_ha. Indexed by crop.
+
+    water_basis="total_need" (default) uses the FAO TM3 total crop water
+    requirement (water_mm(), unchanged from Phase 1-7 -- every existing
+    caller reproduces byte-for-byte). water_basis="net_irrigation" (Phase 8)
+    instead uses agriopt.data.rainfall.net_irrigation_mm(crop,
+    rainfall_scenario), i.e. total need minus effective season rainfall --
+    see docs/water.md."""
     assert price_mode in ("market", "msp_floor"), price_mode
+    assert water_basis in ("total_need", "net_irrigation"), water_basis
 
     ref = load_reference()
     price_frame = load_price_frame()
@@ -81,7 +99,10 @@ def build_crop_params(price_mode: str = "market", crops: list[str] = CROPS, verb
         cost_ha = cost_rs_per_ha(crop, yield_qtl_ha, ref)
         profit_ha = yield_qtl_ha * price - cost_ha
 
-        water_m3_ha = water_mm(crop, ref) * MM_TO_M3_PER_HA
+        if water_basis == "net_irrigation":
+            water_m3_ha = net_irrigation_mm(crop, rainfall_scenario, ref) * MM_TO_M3_PER_HA
+        else:
+            water_m3_ha = water_mm(crop, ref) * MM_TO_M3_PER_HA
         fert_kg_ha = fert_total_kg_ha(crop, ref)
 
         if crop == "sugarcane":

@@ -34,14 +34,20 @@ Water = sum_i x_i * W_i,   W_i = water_mm(i) * 10   [m^3/ha]
 
 - `water_mm(i)` = midpoint of `crop_reference.csv`'s `water_mm_min`/`water_mm_max`
   (FAO TM3 crop water need range; tur uses the FAO TM3 "beans" proxy)
-- **Limitation**: this is FAO TM3's TOTAL crop water NEED over the growing
-  season, not NET IRRIGATION requirement (which would subtract effective
-  rainfall received during the season). For rainfed/partially-rainfed crops
-  this overstates the water that would actually need to come from
-  irrigation. Treat `WATER_BUDGET_M3` scenarios as a **water-need budget**,
-  not a literal canal/well supply figure -- a real irrigation-planning
-  version of this model would need a net-irrigation-requirement figure
-  (crop water need minus effective rainfall) instead.
+- **Limitation (Phase 1-7 default)**: `Scenario.water_basis` defaults to
+  `"total_need"` -- FAO TM3's TOTAL crop water NEED over the growing season,
+  not NET IRRIGATION requirement (which would subtract effective rainfall
+  received during the season). For rainfed/partially-rainfed crops this
+  overstates the water that would actually need to come from irrigation.
+  Treat `WATER_BUDGET_M3` scenarios as a **water-need budget**, not a
+  literal canal/well supply figure, under this default basis.
+- **Phase 8 fix**: passing `water_basis="net_irrigation"` computes `W_i`
+  from `agriopt.data.rainfall.net_irrigation_mm()` instead -- crop water
+  need minus effective season rainfall (IMD sub-divisional monthly
+  rainfall, USDA-SCS/CROPWAT effective-rainfall formula) -- giving a real
+  net-irrigation-requirement figure. See `docs/water.md` and
+  `reports/results/water_basis_comparison.md`. The default stays
+  `"total_need"` so every Phase 1-7.1 result is unaffected.
 
 **Fertilizer** (minimized -- `f3 = Fert`)
 

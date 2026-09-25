@@ -27,6 +27,9 @@ MODELS_DIR = REPO_ROOT / "models"
 YIELD_RAW_CSV = DATA_RAW / "yield" / "crop_yield.csv"
 PRICE_RAW_CSV = DATA_RAW / "prices" / "Agriculture_price_dataset.csv"
 CEDA_RAW_DIR = DATA_RAW / "prices_ceda"
+# Phase 8: IMD sub-divisional monthly rainfall (Kaggle "rajanand/rainfall-in-india"),
+# used to derive net irrigation requirement (see agriopt.data.rainfall, docs/water.md).
+RAINFALL_RAW_CSV = DATA_RAW / "rainfall" / "rainfall in india 1901-2015.csv"
 
 YIELD_CLEAN_PARQUET = DATA_PROCESSED / "yield_clean.parquet"
 PRICES_MONTHLY_PARQUET = DATA_PROCESSED / "prices_monthly.parquet"

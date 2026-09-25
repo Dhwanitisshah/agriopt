@@ -1,8 +1,26 @@
 """Solvers for the crop allocation problem: NSGA-II (pymoo), LP profit-max
 and epsilon-constraint (scipy HiGHS), an exact lexicographic LP reference
 front, and a pseudo-weights recommender.
-"""
+
+Reproducibility (Phase 8): this module runs many repeated NSGA-II/NSGA-III
+optimizations, so -- matching the convention already used by
+scripts/40_build_cache.py, scripts/smoke_e2e.py, scripts/stress_app.py, and
+app/streamlit_app.py -- it pins BLAS/OpenMP thread counts to 1 here too,
+BEFORE numpy/pymoo/scipy are imported, so every caller (including pytest,
+which does not itself set these) gets a single-threaded, reproducible
+environment regardless of whether the calling script also sets it. This
+guards against BLAS/OpenMP thread nondeterminism in general; it was NOT,
+however, the actual root cause of the NSGA-III non-reproducibility this
+phase investigated -- see agriopt.models.yield_model._force_single_threaded_predict
+for that (a joblib-parallel RandomForestRegressor.predict() with n_jobs=-1
+inside build_crop_params's yield lookup, not anything in this module or in
+pymoo's own seeding)."""
 from __future__ import annotations
+
+import os
+
+for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
+    os.environ.setdefault(_env_var, "1")
 
 import time
 
@@ -46,7 +64,9 @@ def solve_nsga2(scenario: Scenario, params_df: pd.DataFrame | None = None, pop: 
     water_m3, fert_kg] -- profit is flipped back to positive for output
     (internally the problem minimizes -profit)."""
     if params_df is None:
-        params_df = build_crop_params(scenario.price_mode, verbose=False)
+        params_df = build_crop_params(
+            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+        )
     problem = CropAllocationProblem(params_df, scenario)
     algorithm = NSGA2(pop_size=pop)
 
@@ -69,7 +89,9 @@ def solve_nsga2(scenario: Scenario, params_df: pd.DataFrame | None = None, pop: 
 def solve_lp_profit_max(scenario: Scenario, params_df: pd.DataFrame | None = None):
     """Returns (x, profit) or (None, None) if infeasible."""
     if params_df is None:
-        params_df = build_crop_params(scenario.price_mode, verbose=False)
+        params_df = build_crop_params(
+            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+        )
     _, profit, _, _, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
 
     res = linprog(-profit, A_ub=base_A, b_ub=base_b, bounds=bounds, method="highs")
@@ -85,7 +107,9 @@ def solve_lp_eps(scenario: Scenario, min_profit: float, params_df: pd.DataFrame 
     """Minimize water subject to profit >= min_profit and all other
     constraints. Returns (x, water) or (None, None) if infeasible."""
     if params_df is None:
-        params_df = build_crop_params(scenario.price_mode, verbose=False)
+        params_df = build_crop_params(
+            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+        )
     _, profit, water, _, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
 
     A_ub = np.vstack([base_A, -profit])
@@ -107,7 +131,9 @@ def exact_front_lp(scenario: Scenario, n: int = 50, params_df: pd.DataFrame | No
     reference front. Returns (X, F) with F columns [profit, water, fert],
     profit positive, same convention as solve_nsga2."""
     if params_df is None:
-        params_df = build_crop_params(scenario.price_mode, verbose=False)
+        params_df = build_crop_params(
+            scenario.price_mode, verbose=False, water_basis=scenario.water_basis, rainfall_scenario=scenario.rainfall_scenario
+        )
     crops, profit, water, fert, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
 
     res_min = linprog(profit, A_ub=base_A, b_ub=base_b, bounds=bounds, method="highs")

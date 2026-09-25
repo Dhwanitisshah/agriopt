@@ -35,12 +35,14 @@ from agriopt.config import (
     YIELD_CLEAN_PARQUET,
     YIELD_TO_SALEABLE_QTL_PER_HA,
 )
+from agriopt.data.rainfall import net_irrigation_mm
 from agriopt.data.reference import fert_total_kg_ha, load_reference, water_mm
 from agriopt.models.price_model import build_wide_price_table, load_price_frame
 from agriopt.models.yield_model import (
     CANON_TO_YIELD_NAME,
     CORE_NUM_COLS,
     SklearnYieldModel,
+    _force_single_threaded_predict,
     load_model_frame,
     tune_rf,
 )
@@ -131,6 +133,10 @@ def refit_yield_model_for_year(t: int, cache_dir=BACKTEST_MODELS_DIR):
 
     if model_path.exists() and meta_path.exists():
         model = joblib.load(model_path)
+        # Phase 8 reproducibility fix (see agriopt.models.yield_model._force_single_threaded_predict):
+        # cached models here were saved with RandomForestRegressor(n_jobs=-1) baked in, which makes
+        # predict() non-reproducible across process runs -- force n_jobs=1 on load, same as load_model().
+        _force_single_threaded_predict(model)
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         return model, num_cols, meta
 
@@ -144,6 +150,10 @@ def refit_yield_model_for_year(t: int, cache_dir=BACKTEST_MODELS_DIR):
 
     model = SklearnYieldModel("RandomForest", RandomForestRegressor(random_state=RANDOM_SEED, n_jobs=-1, **rf_params), num_cols)
     model.fit(train_df)
+    # Phase 8 reproducibility fix: force single-threaded predict before caching (see
+    # agriopt.models.yield_model._force_single_threaded_predict for why n_jobs=-1 predict() is
+    # not bit-reproducible across process runs).
+    _force_single_threaded_predict(model)
 
     meta = {"train_max_year": int(train_df["year"].max()), "rf_params": rf_params, "decision_year": t}
     joblib.dump(model, model_path, compress=3)
@@ -226,21 +236,39 @@ def _price_std_leakfree(crop: str, origin: pd.Timestamp, wide: pd.DataFrame, loo
 # --- 3) Assemble a params_df (forecast OR realized) ------------------------
 
 
-def _base_params_row(crop: str, yield_qtl_ha: float, price: float, cost_ha: float, water_ref: pd.DataFrame) -> dict:
+def _base_params_row(
+    crop: str,
+    yield_qtl_ha: float,
+    price: float,
+    cost_ha: float,
+    water_ref: pd.DataFrame,
+    water_basis: str = "total_need",
+    rainfall_scenario: str = "normal",
+) -> dict:
     profit_ha = yield_qtl_ha * price - cost_ha
+    if water_basis == "net_irrigation":
+        water_mm_val = net_irrigation_mm(crop, rainfall_scenario, water_ref)
+    else:
+        water_mm_val = water_mm(crop, water_ref)
     return {
         "crop": crop,
         "yield_qtl_ha": yield_qtl_ha,
         "price": price,
         "cost_ha": cost_ha,
         "profit_ha": profit_ha,
-        "water_m3_ha": water_mm(crop, water_ref) * MM_TO_M3_PER_HA,
+        "water_m3_ha": water_mm_val * MM_TO_M3_PER_HA,
         "fert_kg_ha": fert_total_kg_ha(crop, water_ref),
         "seasons_occupied": seasons_occupied(crop),
     }
 
 
-def build_forecast_params_df(t: int, crops: list[str] = CROPS, state: str = STATE) -> tuple[pd.DataFrame, dict]:
+def build_forecast_params_df(
+    t: int,
+    crops: list[str] = CROPS,
+    state: str = STATE,
+    water_basis: str = "total_need",
+    rainfall_scenario: str = "normal",
+) -> tuple[pd.DataFrame, dict]:
     """The full leak-free PLANNING info set for decision year t: refits the
     yield model on year<=t-1, forecasts price naively at the decision month,
     and derives cost from msp_history.csv. Returns (params_df, info) where
@@ -261,7 +289,7 @@ def build_forecast_params_df(t: int, crops: list[str] = CROPS, state: str = STAT
         yield_qtl_ha = yields[crop]["value"]
         price = prices[crop]["value"]
         cost_ha, cost_method = cost_for_year(crop, t, msp_hist, ref)
-        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref)
+        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario)
         origin_month = prices[crop]["origin_month"]
         origin = pd.Timestamp(origin_month) if origin_month else pd.Timestamp(year=t, month=DECISION_MONTH[MAIN_SEASON[crop]] if crop != "sugarcane" else 6, day=1)
         row["profit_std_ha"] = yield_qtl_ha * _price_std_leakfree(crop, origin, wide)
@@ -305,7 +333,13 @@ def realized_price_for_year(crop: str, t: int, msp_hist: pd.DataFrame, wide: pd.
     return float(np.mean(vals)) if vals else None
 
 
-def build_realized_params_df(t: int, crops: list[str] = CROPS, state: str = STATE) -> tuple[pd.DataFrame, list[str]]:
+def build_realized_params_df(
+    t: int,
+    crops: list[str] = CROPS,
+    state: str = STATE,
+    water_basis: str = "total_need",
+    rainfall_scenario: str = "normal",
+) -> tuple[pd.DataFrame, list[str]]:
     """The REALIZED outcome info set for year t: actual Maharashtra yield,
     actual harvest-window mean price, and the same cost_t as planning (cost
     isn't "revealed" after the season -- it's realized as spent, same figure
@@ -326,7 +360,7 @@ def build_realized_params_df(t: int, crops: list[str] = CROPS, state: str = STAT
             missing.append(crop)
             continue
         cost_ha, _ = cost_for_year(crop, t, msp_hist, ref)
-        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref)
+        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario)
         row["profit_std_ha"] = 0.0  # not used for realized evaluation (no forward-looking risk on an outcome)
         rows.append(row)
 

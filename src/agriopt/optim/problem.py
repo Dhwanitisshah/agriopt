@@ -25,6 +25,16 @@ class Scenario:
     food_share_min: float = 0.3
     max_share: float = 0.5
     price_mode: str = "market"
+    # Phase 8: which water quantity water_m3_ha is computed from in
+    # build_crop_params -- "total_need" (default, FAO TM3 total crop water
+    # requirement, unchanged from Phase 1-7) or "net_irrigation" (total need
+    # minus effective monsoon/season rainfall, agriopt.data.rainfall). MUST
+    # default to "total_need" so every existing caller/result reproduces
+    # byte-for-byte with no code changes -- see docs/water.md.
+    water_basis: str = "total_need"
+    # Phase 8: which rainfall scenario ("normal" 30-yr mean or "dry" 20th
+    # percentile year) net_irrigation_mm() uses, when water_basis="net_irrigation".
+    rainfall_scenario: str = "normal"
 
 
 class CropAllocationProblem(Problem):

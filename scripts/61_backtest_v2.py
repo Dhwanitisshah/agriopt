@@ -124,23 +124,29 @@ def load_backtest_module():
     return module
 
 
-_YEAR_CACHE: dict[int, tuple] = {}
+_YEAR_CACHE: dict[tuple, tuple] = {}
 
 
-def get_year_data(backtest, t: int):
-    if t not in _YEAR_CACHE:
-        _YEAR_CACHE[t] = backtest.run_year(t)
-    return _YEAR_CACHE[t]
+def get_year_data(backtest, t: int, water_basis: str = "total_need", rainfall_scenario: str = "normal"):
+    key = (t, water_basis, rainfall_scenario)
+    if key not in _YEAR_CACHE:
+        _YEAR_CACHE[key] = backtest.run_year(t, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
+    return _YEAR_CACHE[key]
 
 
-def run_analysis(backtest):
+def run_analysis(backtest, water_basis: str = "total_need", rainfall_scenario: str = "normal"):
     """Runs the full 7.1 analysis and returns (fairness_df, rows_df,
     b2_oracle_df, decomp_df) -- pulled out of main() so tests can call it
-    directly against a subset of years without re-deriving the CLI plumbing."""
+    directly against a subset of years without re-deriving the CLI plumbing.
+    water_basis/rainfall_scenario (Phase 8): defaults reproduce the original
+    (total_need) analysis unchanged; water_basis="net_irrigation" reruns the
+    whole thing (B1_SCALED, profit-per-1000m3, capture_ratio_w, ...) with
+    every params_df built under net irrigation water instead -- see
+    scripts/70_water_basis_net.py."""
     fairness_rows, rows_v2, b2_oracle_rows, decomp_rows = [], [], [], []
 
     for t in backtest.YEARS:
-        rows, meta = get_year_data(backtest, t)
+        rows, meta = get_year_data(backtest, t, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
         forecast_params = meta["forecast_params"]
         realized_params = meta["realized_params"]
         missing = meta["missing_realized"]
