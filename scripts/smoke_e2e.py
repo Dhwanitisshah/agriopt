@@ -4,6 +4,15 @@ No Streamlit involved. Exit code 0 on success, 1 on failure.
 """
 from __future__ import annotations
 
+# Hotfix (Streamlit Community Cloud): src-layout package -- see
+# app/streamlit_app.py's matching block for why this must run before any
+# project import, including the thread-env block below.
+import sys, pathlib
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+for p in (_ROOT / "src", _ROOT):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
 import os
 
 # Demo-hardening Item 1: see app/streamlit_app.py's matching block for why --
@@ -12,12 +21,7 @@ import os
 for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
     os.environ.setdefault(_env_var, "1")
 
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = _ROOT
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")

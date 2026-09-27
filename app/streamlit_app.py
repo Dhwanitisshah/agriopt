@@ -1,3 +1,17 @@
+# Hotfix (Streamlit Community Cloud): this is a src-layout package
+# (pyproject.toml: packages under src/). Locally, `pip install -e .` puts
+# src/agriopt on sys.path, so app/streamlit_app.py never needed to. On
+# Streamlit Cloud, only requirements-app.txt is installed (no `pip install
+# -e .` -- see the fresh-clone deploy-readiness check), so without this,
+# `from agriopt...` raises ModuleNotFoundError. Must run before ANY project
+# import, including the thread-env block below (which only touches `os`,
+# but keeping this literally first avoids relying on that).
+import sys, pathlib
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+for p in (_ROOT / "src", _ROOT):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+
 import os
 
 # Demo-hardening Item 1: cap native (BLAS/OpenMP/numba) thread pools to 1
@@ -12,12 +26,7 @@ import os
 for _env_var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "NUMBA_NUM_THREADS"):
     os.environ.setdefault(_env_var, "1")
 
-import sys
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = _ROOT
 
 import pandas as pd
 import streamlit as st
