@@ -13,7 +13,7 @@ import json
 import numpy as np
 import pandas as pd
 
-from agriopt.config import DATA_PROCESSED, YIELD_CLEAN_PARQUET
+from agriopt.config import DATA_PROCESSED
 from agriopt.optim.risk import RiskInputs
 
 CACHE_PATH = DATA_PROCESSED / "crop_params_cache.json"
@@ -56,10 +56,6 @@ def params_records_for(raw: dict, region: str, water_basis: str, rainfall_scenar
 
 def params_df_for(raw: dict, region: str, water_basis: str, rainfall_scenario: str, price_mode: str) -> pd.DataFrame:
     return params_df_from_records(params_records_for(raw, region, water_basis, rainfall_scenario, price_mode))
-
-
-def load_yield_clean() -> pd.DataFrame:
-    return pd.read_parquet(YIELD_CLEAN_PARQUET)
 
 
 def risk_inputs_from_cache(raw: dict, sugarcane_mode: str = "conservative") -> RiskInputs:
