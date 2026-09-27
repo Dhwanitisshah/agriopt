@@ -20,8 +20,16 @@ import pandas as pd
 from agriopt.config import CROPS, MAIN_SEASON
 from agriopt.data.rainfall import REGIONS, net_irrigation_mm
 from agriopt.data.reference import cost_rs_per_ha, fert_total_kg_ha, load_reference, water_mm
-from agriopt.models.price_model import expected_price, load_price_frame
-from agriopt.models.yield_model import expected_yield_saleable
+
+# Phase 10 deploy-readiness: agriopt.models.price_model/yield_model both
+# import xgboost/sklearn at module top. build_crop_params() (below) is the
+# ONLY thing in this module that calls them, but it is itself imported (via
+# agriopt.optim.solvers) by app/pipeline.py, which the Streamlit app DOES
+# import at module level for its live NSGA-II/LP calls -- a module-level
+# import here would transitively load xgboost/sklearn into the app's live
+# process even though the app never calls build_crop_params itself (it only
+# reads scripts/40_build_cache.py's precomputed cache). Deferred into the
+# function body instead -- no logic change, import location only.
 
 MM_TO_M3_PER_HA = 10.0  # 1mm over 1ha (10,000 m^2) = 10 m^3
 PRICE_STD_LOOKBACK_MONTHS = 36
@@ -80,6 +88,9 @@ def build_crop_params(
     used, when water_basis="net_irrigation" -- default "maharashtra" (the
     area-weighted state-wide average) reproduces every existing caller's
     behavior unchanged."""
+    from agriopt.models.price_model import expected_price, load_price_frame
+    from agriopt.models.yield_model import expected_yield_saleable
+
     assert price_mode in ("market", "msp_floor"), price_mode
     assert water_basis in ("total_need", "net_irrigation"), water_basis
     assert region in REGIONS, region

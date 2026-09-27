@@ -6,6 +6,8 @@ import numpy as np
 import pytest
 from scipy import stats as sstats
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 from agriopt.config import STATE, TRAIN_END_YEAR
 from agriopt.models.yield_model import load_model_frame, train_test_split_by_year
 from agriopt.stats.bootstrap import bootstrap_metric_ci, mae

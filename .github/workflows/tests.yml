@@ -1,0 +1,45 @@
+name: tests
+
+on:
+  push:
+    branches: ["main", "master", "final"]
+  pull_request:
+    branches: ["main", "master", "final"]
+
+env:
+  # Phase 8's reproducibility guard: pin native (BLAS/OpenMP/numba) thread
+  # pools to 1 -- same rationale/pattern as app/streamlit_app.py,
+  # scripts/40_build_cache.py, scripts/smoke_e2e.py, scripts/stress_app.py,
+  # and src/agriopt/optim/solvers.py's own module-top guard.
+  OMP_NUM_THREADS: "1"
+  OPENBLAS_NUM_THREADS: "1"
+  MKL_NUM_THREADS: "1"
+  NUMBA_NUM_THREADS: "1"
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Python 3.13 -- matches this repo's own .venv (see .venv/pyvenv.cfg);
+      # Python 3.11 was originally requested but never installed on the dev
+      # machine (see README.md's Setup section).
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install full requirements + editable package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -e .
+
+      - name: Run test suite (excluding tests that need gitignored data/models)
+        run: pytest -m "not needs_data" -q
+
+      - name: Headless end-to-end smoke test (committed cache only)
+        run: python scripts\smoke_e2e.py
+
+      - name: App tab smoke test (all tabs render, no exceptions)
+        run: python scripts\check_app_tabs.py

@@ -77,7 +77,7 @@ def _server_is_alive(port: int) -> bool:
         return False
 
 
-def _one_pipeline_run(params_df, scenario, weights, risk_aware, weights4, Sigma):
+def _one_pipeline_run(params_df, scenario, weights, risk_aware, weights4, Sigma, current_mix_share=None):
     from app.pipeline import run_pipeline
 
     t0 = time.perf_counter()
@@ -88,6 +88,7 @@ def _one_pipeline_run(params_df, scenario, weights, risk_aware, weights4, Sigma)
         risk_aware=risk_aware,
         weights4=weights4,
         Sigma=Sigma,
+        current_mix_share=current_mix_share,
     )
     return result, time.perf_counter() - t0
 
@@ -100,6 +101,7 @@ def run_stress_loop() -> dict:
 
     raw = appdata.load_cache_raw()
     params_df = appdata.params_df_from_records(raw["price_modes"]["market"])
+    current_mix_share = raw.get("current_mix_shares")  # Phase 10: never reads yield_clean.parquet
     weights = weights_from_priority(DEFAULT_PRIORITY)
     weights4 = weights4_from_priority_and_risk_aversion(DEFAULT_PRIORITY, DEFAULT_RISK_AVERSION)
     preset_names = list(PRESETS.keys())
@@ -109,14 +111,14 @@ def run_stress_loop() -> dict:
     for i in range(N_RUNS_PER_MODE):
         preset = PRESETS[preset_names[i % len(preset_names)]]
         land_ha = float(preset["land_ha"]) if preset["land_ha"] is not None else DEFAULT_LAND_HA
-        water_budget = preset["water_mult"] * current_mix_water(params_df, land_ha)
+        water_budget = preset["water_mult"] * current_mix_water(params_df, land_ha, current_mix_share)
         scenario = Scenario(water_budget_m3=water_budget, land_ha=land_ha, food_share_min=DEFAULT_FOOD_SHARE_MIN, max_share=DEFAULT_MAX_SHARE, price_mode=DEFAULT_PRICE_MODE)
         plan.append({"mode": "normal", "scenario": scenario, "risk_aware": False, "weights4": None, "Sigma": None})
 
     for i in range(N_RUNS_PER_MODE):
         preset = PRESETS[preset_names[i % len(preset_names)]]
         land_ha = float(preset["land_ha"]) if preset["land_ha"] is not None else DEFAULT_LAND_HA
-        water_budget = preset["water_mult"] * current_mix_water(params_df, land_ha)
+        water_budget = preset["water_mult"] * current_mix_water(params_df, land_ha, current_mix_share)
         scenario = Scenario(water_budget_m3=water_budget, land_ha=land_ha, food_share_min=DEFAULT_FOOD_SHARE_MIN, max_share=DEFAULT_MAX_SHARE, price_mode=DEFAULT_PRICE_MODE)
         sugarcane_mode = sugarcane_modes[i % len(sugarcane_modes)]
         risk_inputs = appdata.risk_inputs_from_cache(raw, sugarcane_mode=sugarcane_mode)
@@ -130,7 +132,9 @@ def run_stress_loop() -> dict:
 
     for i, run in enumerate(plan):
         executor = ThreadPoolExecutor(max_workers=1)  # fresh executor per call -- abandon a hung worker rather than reuse it
-        future = executor.submit(_one_pipeline_run, params_df, run["scenario"], weights, run["risk_aware"], run["weights4"], run["Sigma"])
+        future = executor.submit(
+            _one_pipeline_run, params_df, run["scenario"], weights, run["risk_aware"], run["weights4"], run["Sigma"], current_mix_share
+        )
         try:
             result, runtime_s = future.result(timeout=PER_RUN_TIMEOUT_S)
             runtimes.append(runtime_s)

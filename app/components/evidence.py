@@ -10,6 +10,28 @@ SHAP_IMAGE = REPO_ROOT / "reports" / "results" / "shap_summary_xgb.png"
 RISK_HEATMAP_IMAGE = REPO_ROOT / "reports" / "results" / "risk_correlation_heatmap.png"
 ABLATION_CSV = REPO_ROOT / "reports" / "results" / "ablation_decisions.csv"
 FRONT_QUALITY_V2_CSV = REPO_ROOT / "reports" / "results" / "optim_front_quality_v2.csv"
+RESULTS_INDEX_MD = REPO_ROOT / "reports" / "results" / "RESULTS_INDEX.md"
+
+
+def _parse_results_index_table(md_text: str) -> pd.DataFrame | None:
+    """Parses RESULTS_INDEX.md's one markdown table (# | experiment | output
+    file(s) | headline number | caveat) into a DataFrame -- a raw markdown
+    dump renders badly in Streamlit for a 5-column table with long caveat
+    text, so this is shown as st.dataframe instead (falls back to raw
+    markdown if the table shape ever changes and parsing fails)."""
+    lines = [ln for ln in md_text.splitlines() if ln.strip().startswith("|")]
+    if len(lines) < 3:
+        return None
+    header = [c.strip() for c in lines[0].strip("|").split("|")]
+    rows = []
+    for ln in lines[2:]:
+        cells = [c.strip() for c in ln.strip("|").split("|")]
+        if len(cells) != len(header):
+            continue
+        rows.append(cells)
+    if not rows:
+        return None
+    return pd.DataFrame(rows, columns=header)
 
 
 def _source_label(row: pd.Series) -> str:
@@ -18,6 +40,22 @@ def _source_label(row: pd.Series) -> str:
 
 
 def render_evidence_tab(params_df: pd.DataFrame, yield_meta: dict, price_meta: dict) -> None:
+    st.subheader("Results index (the paper's results skeleton)")
+    st.caption(
+        "One row per experiment across all phases -- headline number + its own most important caveat, "
+        "sourced from reports/results/RESULTS_INDEX.md."
+    )
+    if RESULTS_INDEX_MD.exists():
+        md_text = RESULTS_INDEX_MD.read_text(encoding="utf-8")
+        table_df = _parse_results_index_table(md_text)
+        if table_df is not None:
+            st.dataframe(table_df, hide_index=True, width="stretch")
+        else:
+            st.markdown(md_text)
+    else:
+        st.caption(f"{RESULTS_INDEX_MD.name} not found.")
+
+    st.divider()
     st.subheader("Per-crop inputs")
     ref = pd.read_csv(CROP_REFERENCE_CSV).set_index("crop")
 

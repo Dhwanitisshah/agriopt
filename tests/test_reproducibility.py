@@ -26,6 +26,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
 from agriopt.optim.risk import build_risk_inputs

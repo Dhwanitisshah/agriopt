@@ -46,8 +46,15 @@ import pandas as pd
 
 from agriopt.config import CROPS, MAIN_SEASON, STATE, YIELD_CLEAN_PARQUET, YIELD_TO_SALEABLE_QTL_PER_HA
 from agriopt.data.reference import load_reference
-from agriopt.models.price_model import build_wide_price_table, load_price_frame
-from agriopt.models.yield_model import CANON_TO_YIELD_NAME
+
+# Phase 10 deploy-readiness: agriopt.models.price_model/yield_model both
+# import xgboost/sklearn at module top -- importing them here at MODULE
+# level would make every caller of this module (including
+# app/data.py's `from agriopt.optim.risk import RiskInputs`, which only
+# needs the plain dataclass) transitively pull in those heavy training-only
+# libraries into the Streamlit app's live process. Deferred to inside the
+# functions that actually call them (_yield_series, build_risk_inputs)
+# instead -- no logic change, import location only.
 
 HARVEST_WINDOW_MONTHS = {
     "Kharif": [(0, 10), (0, 11), (0, 12)],  # (year_offset, month) -- Oct-Dec of year t
@@ -59,6 +66,8 @@ MIN_EIGENVALUE_FLOOR = 1e-8
 
 def _yield_series(crop: str, state: str = STATE) -> pd.Series:
     """Maharashtra saleable yield (qtl/ha) by year, for crop's MAIN_SEASON."""
+    from agriopt.models.yield_model import CANON_TO_YIELD_NAME
+
     df = pd.read_parquet(YIELD_CLEAN_PARQUET)
     season = MAIN_SEASON[crop]
     name = CANON_TO_YIELD_NAME[crop]
@@ -162,6 +171,8 @@ def build_risk_inputs(params_df: pd.DataFrame, crops: list[str] = CROPS, state: 
     and a per-crop CV summary table. `params_df` supplies R_i = current
     expected revenue/ha (yield_qtl_ha * price) used to scale the
     (unitless) relative-deviation covariance into Rs^2."""
+    from agriopt.models.price_model import build_wide_price_table, load_price_frame
+
     price_df = load_price_frame()
     wide = build_wide_price_table(price_df)
 

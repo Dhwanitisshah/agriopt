@@ -35,14 +35,15 @@ def main() -> int:
     raw = appdata.load_cache_raw()
     params_df = appdata.params_df_from_records(raw["price_modes"]["market"])
     weights = weights_from_priority(0.5)
+    current_mix_share = raw.get("current_mix_shares")  # Phase 10: never reads yield_clean.parquet -- see baselines.current_mix
 
     # --- default scenario -----------------------------------------------------
     land_ha = 10.0
-    water_default = current_mix_water(params_df, land_ha)
+    water_default = current_mix_water(params_df, land_ha, current_mix_share)
     scenario = Scenario(water_budget_m3=water_default, land_ha=land_ha, food_share_min=0.3, max_share=0.5, price_mode="market")
 
     print(f"Default scenario: land={land_ha} water_budget={water_default:.1f} m3")
-    result = run_pipeline(params_df, scenario, weights)
+    result = run_pipeline(params_df, scenario, weights, current_mix_share=current_mix_share)
     if not result.feasible:
         print(f"FAIL: default scenario reported infeasible: {result.message}")
         return 1
@@ -62,7 +63,7 @@ def main() -> int:
         price_mode="market",
     )
     print("\nInfeasible scenario: water_budget=1.0 m3")
-    infeasible_result = run_pipeline(params_df, infeasible_scenario, weights)
+    infeasible_result = run_pipeline(params_df, infeasible_scenario, weights, current_mix_share=current_mix_share)
     if infeasible_result.feasible:
         print("FAIL: expected the near-zero water budget scenario to be infeasible, but it was feasible")
         return 1

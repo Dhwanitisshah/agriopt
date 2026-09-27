@@ -78,11 +78,15 @@ def apply_price_shocks(
     return out
 
 
-def current_mix_water(params_df: pd.DataFrame, land_ha: float) -> float:
+def current_mix_water(params_df: pd.DataFrame, land_ha: float, current_mix_share: dict[str, float] | None = None) -> float:
     """Water usage of the historical current mix at this land size --
-    price-mode independent, used as the water-budget slider's default."""
+    price-mode independent, used as the water-budget slider's default.
+    `current_mix_share` (Phase 10) is the precomputed B1 area-share dict
+    from the cache (see agriopt.optim.baselines.current_mix's docstring) --
+    the Streamlit app always passes it so this never reads the gitignored
+    yield_clean.parquet at request time."""
     dummy = Scenario(water_budget_m3=1e15, land_ha=land_ha)
-    x1 = current_mix(params_df, dummy)
+    x1 = current_mix(params_df, dummy, precomputed_share=current_mix_share)
     return float(x1 @ params_df["water_m3_ha"].to_numpy())
 
 
@@ -149,6 +153,7 @@ def run_pipeline(
     risk_aware: bool = False,
     weights4: tuple[float, float, float, float] | None = None,
     Sigma: np.ndarray | None = None,
+    current_mix_share: dict[str, float] | None = None,
 ) -> ScenarioResult:
     """Always computes B1/B2/B3 and a 3-objective NSGA-II front (Model A --
     used by the Trade-offs tab's Pareto view regardless of mode). When
@@ -166,7 +171,7 @@ def run_pipeline(
             weights=weights,
         )
 
-    x1 = current_mix(params_df, scenario)
+    x1 = current_mix(params_df, scenario, precomputed_share=current_mix_share)
     r1 = evaluate(x1, params_df, scenario)
     r2 = evaluate(x2, params_df, scenario)
 

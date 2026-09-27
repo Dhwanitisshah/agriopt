@@ -1,0 +1,15 @@
+# Slim requirements for the Streamlit app ONLY (Streamlit Community Cloud
+# deploy target). Pinned from this repo's own .venv (`pip freeze`) on
+# 2026-09-27. Do NOT add xgboost/shap/scikit-learn/kaggle here -- the app
+# never imports agriopt.models.* directly, only agriopt.optim.* /
+# agriopt.data.reference / app.data, all of which read from the committed
+# data/processed/crop_params_cache.json (see scripts/40_build_cache.py,
+# which is the ONLY place in this repo allowed to load the yield/price
+# models). Local dev/training still needs the FULL requirements.txt.
+streamlit==1.64.0
+pandas==3.0.6
+numpy==2.5.3
+plotly==7.1.0
+pymoo==0.6.2
+scipy==1.18.1
+pyarrow==25.0.1

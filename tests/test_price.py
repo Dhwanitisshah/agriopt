@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 from agriopt.config import CROPS, YIELD_MODEL_METADATA_PATH
 from agriopt.data.reference import load_reference
 from agriopt.models.price_model import PRICE_CROPS, build_base_features, build_horizon_table

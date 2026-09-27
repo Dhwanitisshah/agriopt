@@ -80,13 +80,13 @@ def evaluate(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> dict
 # --- B1: current mix ------------------------------------------------------------
 
 
-def current_mix(params_df: pd.DataFrame, scenario: Scenario, n_years: int = 5, state: str = STATE) -> np.ndarray:
-    """Historical Maharashtra area share (mean of each crop's last 5
-    available years, summed across seasons), converted to a hectare
-    allocation for `scenario.land_ha` and uniformly scaled down (if needed)
-    so BOTH season totals fit within land_ha. Water/food constraints are
-    NOT enforced here -- evaluate() will report if they're violated."""
-    crops = list(params_df.index)
+def historical_area_share(crops: list[str], n_years: int = 5, state: str = STATE) -> dict[str, float]:
+    """Extracted from current_mix() (Phase 10) so scripts/40_build_cache.py
+    can precompute this once, offline, into the cache's
+    "current_mix_shares" block -- the ONLY thing current_mix() needs from
+    data/processed/yield_clean.parquet (gitignored, not in the app's
+    committed cache). Reads the parquet directly; not for use in the app's
+    own live path."""
     df = pd.read_parquet(YIELD_CLEAN_PARQUET)
     mh = df[df["state"] == state]
 
@@ -99,7 +99,35 @@ def current_mix(params_df: pd.DataFrame, scenario: Scenario, n_years: int = 5, s
         raw_area[crop] = float(recent.mean()) if len(recent) else 0.0
 
     total_raw = sum(raw_area.values())
-    share = {c: (raw_area[c] / total_raw if total_raw > 0 else 0.0) for c in crops}
+    return {c: (raw_area[c] / total_raw if total_raw > 0 else 0.0) for c in crops}
+
+
+def current_mix(
+    params_df: pd.DataFrame,
+    scenario: Scenario,
+    n_years: int = 5,
+    state: str = STATE,
+    precomputed_share: dict[str, float] | None = None,
+) -> np.ndarray:
+    """Historical Maharashtra area share (mean of each crop's last 5
+    available years, summed across seasons), converted to a hectare
+    allocation for `scenario.land_ha` and uniformly scaled down (if needed)
+    so BOTH season totals fit within land_ha. Water/food constraints are
+    NOT enforced here -- evaluate() will report if they're violated.
+
+    Phase 10 deploy-readiness: `precomputed_share` (crop -> share in [0,1],
+    summing to 1) lets a caller skip reading data/processed/yield_clean.parquet
+    entirely -- this parquet is gitignored and not part of the Streamlit
+    app's committed cache, so the app (via app/pipeline.py) always passes
+    the share precomputed offline by scripts/40_build_cache.py instead.
+    Every OTHER caller (all pre-Phase-10 scripts/tests, which run with the
+    full gitignored dataset present) is unaffected: omitting this argument
+    reproduces the exact same parquet read as before."""
+    crops = list(params_df.index)
+    if precomputed_share is not None:
+        share = {c: float(precomputed_share.get(c, 0.0)) for c in crops}
+    else:
+        share = historical_area_share(crops, n_years=n_years, state=state)
     x_unscaled = np.array([share[c] * scenario.land_ha for c in crops])
 
     kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in crops])

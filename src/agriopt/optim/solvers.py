@@ -34,7 +34,6 @@ from pymoo.util.ref_dirs import get_reference_directions
 from scipy.optimize import linprog, minimize as scipy_minimize
 
 from agriopt.config import FOOD_CROPS
-from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import CropAllocationProblem, Scenario
 from agriopt.optim.problem_risk import CropAllocationProblemRisk
 
@@ -64,6 +63,10 @@ def solve_nsga2(scenario: Scenario, params_df: pd.DataFrame | None = None, pop: 
     water_m3, fert_kg] -- profit is flipped back to positive for output
     (internally the problem minimizes -profit)."""
     if params_df is None:
+        # Deploy-readiness (Phase 10): local import -- see agriopt.optim.params's
+        # module docstring for why this must not be a module-level import here.
+        from agriopt.optim.params import build_crop_params
+
         params_df = build_crop_params(
             scenario.price_mode,
             verbose=False,
@@ -93,6 +96,10 @@ def solve_nsga2(scenario: Scenario, params_df: pd.DataFrame | None = None, pop: 
 def solve_lp_profit_max(scenario: Scenario, params_df: pd.DataFrame | None = None):
     """Returns (x, profit) or (None, None) if infeasible."""
     if params_df is None:
+        # Deploy-readiness (Phase 10): local import -- see agriopt.optim.params's
+        # module docstring for why this must not be a module-level import here.
+        from agriopt.optim.params import build_crop_params
+
         params_df = build_crop_params(
             scenario.price_mode,
             verbose=False,
@@ -115,6 +122,10 @@ def solve_lp_eps(scenario: Scenario, min_profit: float, params_df: pd.DataFrame 
     """Minimize water subject to profit >= min_profit and all other
     constraints. Returns (x, water) or (None, None) if infeasible."""
     if params_df is None:
+        # Deploy-readiness (Phase 10): local import -- see agriopt.optim.params's
+        # module docstring for why this must not be a module-level import here.
+        from agriopt.optim.params import build_crop_params
+
         params_df = build_crop_params(
             scenario.price_mode,
             verbose=False,
@@ -143,6 +154,10 @@ def exact_front_lp(scenario: Scenario, n: int = 50, params_df: pd.DataFrame | No
     reference front. Returns (X, F) with F columns [profit, water, fert],
     profit positive, same convention as solve_nsga2."""
     if params_df is None:
+        # Deploy-readiness (Phase 10): local import -- see agriopt.optim.params's
+        # module docstring for why this must not be a module-level import here.
+        from agriopt.optim.params import build_crop_params
+
         params_df = build_crop_params(
             scenario.price_mode,
             verbose=False,

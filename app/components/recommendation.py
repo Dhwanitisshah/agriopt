@@ -18,7 +18,7 @@ def _crop_season_label(seasons: set) -> str:
     return " + ".join(SEASON_LABELS[s] for s in sorted(seasons))
 
 
-def render_recommendation_tab(result: ScenarioResult, params_df: pd.DataFrame) -> None:
+def render_recommendation_tab(result: ScenarioResult, params_df: pd.DataFrame, conformal: dict | None = None) -> None:
     if not result.feasible:
         st.warning(result.message)
         return
@@ -67,6 +67,35 @@ def render_recommendation_tab(result: ScenarioResult, params_df: pd.DataFrame) -
             hide_index=True,
             width="stretch",
         )
+
+    if conformal is not None:
+        q_per_crop = conformal.get("q_per_crop", {})
+        q_overall = conformal.get("q_overall")
+        level_pct = (1.0 - conformal.get("alpha", 0.1)) * 100
+        rows = []
+        for crop in crops:
+            if crop not in alloc_df["crop"].values:
+                continue
+            q = q_per_crop.get(crop, q_overall)
+            if q is None:
+                continue
+            y = float(params_df.loc[crop, "yield_qtl_ha"])
+            # Same log1p +/- q +/- expm1 construction as
+            # agriopt.models.yield_model.predict_yield_interval, applied to
+            # the already-known point yield estimate in params_df instead of
+            # a live model call (the cache stores only the calibrated
+            # quantile q, not the model itself -- see scripts/40_build_cache.py).
+            lo = float(np.expm1(np.log1p(y) - q))
+            hi = float(np.expm1(np.log1p(y) + q))
+            rows.append({"crop": crop, "yield (qtl/ha)": round(y, 2), "90% interval": f"{lo:.1f} - {hi:.1f}"})
+        if rows:
+            with st.expander(f"Yield uncertainty ({level_pct:.0f}% conformal interval)", expanded=False):
+                st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
+                st.caption(
+                    "Split-conformal intervals (Phase 9), calibrated on 2013-2015 residuals in log1p-yield space "
+                    "-- per-crop where calibrated, else the overall quantile. See the Model inputs & evidence tab "
+                    "(E1.5) for coverage and per-crop caveats."
+                )
 
     with st.expander("Why these crops?", expanded=False):
         Sigma = result.Sigma if result.risk_aware else None

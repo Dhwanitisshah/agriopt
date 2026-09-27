@@ -24,13 +24,16 @@ import streamlit as st
 
 from app import data as appdata
 from app.components.about import render_about_tab
+from app.components.backtest_tab import render_backtest_tab
 from app.components.comparison import render_comparison_tab
 from app.components.evidence import render_evidence_tab
 from app.components.recommendation import render_recommendation_tab
+from app.components.regional_tab import render_regional_tab
 from app.components.risk_tab import render_risk_tab
 from app.components.sidebar import render_sidebar
 from app.components.tradeoffs import render_tradeoffs_tab
 from app.pipeline import apply_price_shocks, run_pipeline
+from app.presets import DEFAULT_RAINFALL_SCENARIO, DEFAULT_REGION, DEFAULT_WATER_BASIS
 
 st.set_page_config(page_title="AgriOpt", page_icon=":material/agriculture:", layout="wide")
 
@@ -41,9 +44,9 @@ def _load_cache_raw() -> dict:
 
 
 @st.cache_data(show_spinner=False)
-def _params_df(price_mode: str) -> pd.DataFrame:
+def _params_df(region: str, water_basis: str, rainfall_scenario: str, price_mode: str) -> pd.DataFrame:
     raw = _load_cache_raw()
-    return appdata.params_df_from_records(raw["price_modes"][price_mode])
+    return appdata.params_df_for(raw, region, water_basis, rainfall_scenario, price_mode)
 
 
 @st.cache_resource(show_spinner=False)
@@ -62,12 +65,25 @@ if not appdata.cache_exists():
     st.stop()
 
 cache_raw = _load_cache_raw()
-params_market = _params_df("market")
+# Reference df for the sidebar's water-slider default / preset buttons / FRP
+# default -- always the app's own default region+water_basis+rainfall
+# scenario (Maharashtra, net_irrigation, normal), regardless of what the
+# region/water-basis selectors are currently set to. This is a cosmetic
+# reference figure only (it just seeds slider defaults); the actual
+# optimization below always uses params_df built from the REAL selected
+# scenario fields. Avoided a sidebar re-order (region/water-basis selectors
+# render after the water slider) for a same-run circular dependency.
+params_market = _params_df(DEFAULT_REGION, DEFAULT_WATER_BASIS, DEFAULT_RAINFALL_SCENARIO, "market")
+# Phase 10 deploy-readiness: B1 (current_mix)'s historical area share,
+# precomputed offline into the cache (scripts/40_build_cache.py) -- the app
+# never reads data/processed/yield_clean.parquet itself (gitignored, not
+# present in a fresh clone). Threaded through render_sidebar/run_pipeline.
+current_mix_share = cache_raw.get("current_mix_shares")
 
-sidebar_inputs = render_sidebar(params_market)
+sidebar_inputs = render_sidebar(params_market, current_mix_share)
 scenario = sidebar_inputs.scenario
 weights = sidebar_inputs.weights
-params_df = _params_df(scenario.price_mode)
+params_df = _params_df(scenario.region, scenario.water_basis, scenario.rainfall_scenario, scenario.price_mode)
 params_df = apply_price_shocks(params_df, sidebar_inputs.price_multipliers, sidebar_inputs.sugarcane_frp_override)
 
 risk_inputs = _risk_inputs(sidebar_inputs.sugarcane_risk_mode)
@@ -92,7 +108,9 @@ matched_preset = appdata.match_preset(
     sidebar_inputs.sugarcane_frp_override,
     sugarcane_default_frp,
     params_market,
+    cache_raw,
 )
+
 
 if matched_preset is not None:
     mode_key = "risk_aware" if sidebar_inputs.risk_aware else "normal"
@@ -114,6 +132,7 @@ elif sidebar_inputs.run_clicked or st.session_state["scenario_result"] is None:
             risk_aware=sidebar_inputs.risk_aware,
             weights4=sidebar_inputs.weights4,
             Sigma=risk_inputs.Sigma if sidebar_inputs.risk_aware else None,
+            current_mix_share=current_mix_share,
         )
 
 result = st.session_state["scenario_result"]
@@ -124,12 +143,21 @@ if result.feasible and result.risk_aware_failed:
 if result.feasible and result.from_cache:
     st.caption(":material/bolt: cached result for this farmer profile -- shown instantly, not re-optimized.")
 
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
-    ["Recommendation", "Trade-offs", "Strategy comparison", "Risk", "Model inputs & evidence", "About & limitations"]
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(
+    [
+        "Recommendation",
+        "Trade-offs",
+        "Strategy comparison",
+        "Risk",
+        "Backtest (2016-2019)",
+        "Regional view",
+        "Model inputs & evidence",
+        "About & limitations",
+    ]
 )
 
 with tab1:
-    render_recommendation_tab(result, params_df)
+    render_recommendation_tab(result, params_df, cache_raw.get("conformal"))
 with tab2:
     render_tradeoffs_tab(result, params_df)
 with tab3:
@@ -137,6 +165,10 @@ with tab3:
 with tab4:
     render_risk_tab(result, params_df, risk_inputs, R, sugarcane_mode=sidebar_inputs.sugarcane_risk_mode)
 with tab5:
-    render_evidence_tab(params_df, cache_raw["yield_model_metadata"], cache_raw["price_model_metadata"])
+    render_backtest_tab(cache_raw.get("backtest"))
 with tab6:
+    render_regional_tab(cache_raw.get("region_comparison"))
+with tab7:
+    render_evidence_tab(params_df, cache_raw["yield_model_metadata"], cache_raw["price_model_metadata"])
+with tab8:
     render_about_tab()

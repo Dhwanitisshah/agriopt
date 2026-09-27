@@ -1,0 +1,13 @@
+# Streamlit Community Cloud deploy config (Phase 10). Schema per Streamlit's
+# own config.toml reference (server.headless / theme.* keys, stable across
+# recent Streamlit releases -- this repo's own streamlit==1.64.0, see
+# requirements-app.txt).
+[server]
+headless = true
+
+[theme]
+primaryColor = "#2E7D32"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F1F8E9"
+textColor = "#1B1B1B"
+font = "sans serif"

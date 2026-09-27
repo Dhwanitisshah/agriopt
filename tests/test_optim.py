@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, profit_max, same_profit_min_water
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario

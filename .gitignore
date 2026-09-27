@@ -1,6 +1,13 @@
 .venv/
 data/raw/
-data/processed/
+# Phase 10: data/processed/* (not data/processed/, a directory-level ignore)
+# so git still descends into the directory and lets the negation below
+# un-ignore just the one committed cache file -- a bare "!data/processed/…"
+# negation under a directory-level ignore is a no-op in git (git never
+# looks inside an ignored directory at all), so the parent pattern here MUST
+# be the wildcard-contents form, not the directory form, for this to work.
+data/processed/*
+!data/processed/crop_params_cache.json
 /models/
 .env
 __pycache__/

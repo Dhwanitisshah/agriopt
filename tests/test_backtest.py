@@ -7,6 +7,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 from agriopt.backtest.info import (
     build_forecast_params_df,
     build_realized_params_df,

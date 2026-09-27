@@ -3,6 +3,8 @@ from unittest.mock import MagicMock
 import pandas as pd
 import pytest
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 from agriopt.config import (
     CROPS,
     CROP_NAME_MAP,

@@ -15,6 +15,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 

@@ -40,6 +40,24 @@ def params_df_from_records(records: list[dict]) -> pd.DataFrame:
     return df
 
 
+def params_records_for(raw: dict, region: str, water_basis: str, rainfall_scenario: str, price_mode: str) -> list[dict]:
+    """Phase 10: looks up one params variant from the cache's nested
+    "params" block: params[region][water_basis][price_mode] for
+    water_basis="total_need" (rainfall_scenario is irrelevant to
+    build_crop_params in that branch, so it is not a key there -- see
+    scripts/40_build_cache.py's docstring for the full schema), or
+    params[region][water_basis][rainfall_scenario][price_mode] for
+    water_basis="net_irrigation"."""
+    block = raw["params"][region][water_basis]
+    if water_basis == "net_irrigation":
+        block = block[rainfall_scenario]
+    return block[price_mode]
+
+
+def params_df_for(raw: dict, region: str, water_basis: str, rainfall_scenario: str, price_mode: str) -> pd.DataFrame:
+    return params_df_from_records(params_records_for(raw, region, water_basis, rainfall_scenario, price_mode))
+
+
 def load_yield_clean() -> pd.DataFrame:
     return pd.read_parquet(YIELD_CLEAN_PARQUET)
 
@@ -88,6 +106,7 @@ def match_preset(
     sugarcane_frp_override: float,
     sugarcane_default_frp: float,
     params_df_for_water_ref: pd.DataFrame,
+    cache_raw: dict | None = None,
 ) -> str | None:
     """Demo-hardening Item 4: returns the matching preset name if every
     current sidebar input exactly equals that preset's values at the app's
@@ -95,7 +114,15 @@ def match_preset(
     combinations), else None. Any active what-if price shock, or any
     non-default constraint/priority/risk setting, disqualifies a cache hit
     -- those combinations were never precomputed, so falling through to a
-    live run is correct, not a bug."""
+    live run is correct, not a bug.
+
+    Phase 10: each preset now also has its own region/water_basis/
+    rainfall_scenario (app/presets.py); a scenario only matches a preset if
+    those three fields also match exactly, and the preset's own water
+    reference (region/water_basis-specific current-mix water, looked up
+    from `cache_raw["params"]` when provided) is used instead of always
+    assuming Maharashtra/net_irrigation -- otherwise the 5th (Marathwada)
+    preset's water_budget_m3 would never match."""
     from app.pipeline import current_mix_water
     from app.presets import (
         DEFAULT_FOOD_SHARE_MIN,
@@ -122,10 +149,24 @@ def match_preset(
         return None
 
     for name, preset in PRESETS.items():
+        preset_region = preset.get("region", "maharashtra")
+        preset_water_basis = preset.get("water_basis", "net_irrigation")
+        preset_rainfall_scenario = preset.get("rainfall_scenario", "normal")
+        if scenario.region != preset_region or scenario.water_basis != preset_water_basis:
+            continue
+        if preset_water_basis == "net_irrigation" and scenario.rainfall_scenario != preset_rainfall_scenario:
+            continue
+
         land_ha = float(preset["land_ha"]) if preset["land_ha"] is not None else DEFAULT_LAND_HA
         if abs(scenario.land_ha - land_ha) > 1e-6:
             continue
-        expected_water = preset["water_mult"] * current_mix_water(params_df_for_water_ref, land_ha)
+
+        if cache_raw is not None:
+            ref_df = params_df_for(cache_raw, preset_region, preset_water_basis, preset_rainfall_scenario, DEFAULT_PRICE_MODE)
+        else:
+            ref_df = params_df_for_water_ref
+        current_mix_share = cache_raw.get("current_mix_shares") if cache_raw is not None else None
+        expected_water = preset["water_mult"] * current_mix_water(ref_df, land_ha, current_mix_share)
         if abs(scenario.water_budget_m3 - expected_water) <= max(1.0, expected_water * 1e-6):
             return name
     return None

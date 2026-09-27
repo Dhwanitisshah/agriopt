@@ -11,3 +11,8 @@ readme = "README.md"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+markers = [
+    "needs_data: needs gitignored data/raw, full data/processed (beyond the committed crop_params_cache.json), or models/*.joblib -- skipped in CI (`pytest -m \"not needs_data\"`), run locally with the full dataset present.",
+]
