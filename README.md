@@ -2,7 +2,7 @@
 
 [![tests](https://github.com/Dhwanitisshah/agriopt/actions/workflows/tests.yml/badge.svg)](https://github.com/Dhwanitisshah/agriopt/actions/workflows/tests.yml)
 
-**Live demo:** `[TODO: Streamlit Community Cloud URL once deployed]`
+**Live demo:** `https://agriopt-bmuud9kclfctcmxrb3abce.streamlit.app`
 
 Maharashtra's farmers choose what to plant largely on habit and last year's prices, with no
 systematic way to weigh profit against water use, fertilizer load, food-crop security, or
