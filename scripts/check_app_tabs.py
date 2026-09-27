@@ -10,12 +10,16 @@ subprocess, the same pattern already used for scripts/smoke_e2e.py.
 """
 from __future__ import annotations
 
-import sys
-from pathlib import Path
+# Hotfix (Streamlit Community Cloud): src-layout package -- see
+# app/streamlit_app.py's matching block for why this must run before any
+# project import.
+import sys, pathlib
+_ROOT = pathlib.Path(__file__).resolve().parents[1]
+for p in (_ROOT / "src", _ROOT):
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = _ROOT
 
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
