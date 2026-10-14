@@ -78,3 +78,36 @@ Phase 8 state-wide rainfall: rice net irrigation 0 mm). Regenerated: rice 200 mm
   `test_b2_and_oracle_allocations_differ_in_most_cells`.
 * `scripts/30_run_optimizer.py`: the generated finding said B1's food share (27.2%) was "comfortably
   above the 30% minimum"; now compares against the real minimum.
+
+## Phase 2
+
+### Task 3 -- exact LP recommendation (H3)
+
+`solvers.polish_front` replaces every NSGA-II point by the lexicographic LP optimum at the same water and
+fertilizer caps (max profit, then min water, then min fert), de-duplicates and drops dominated points.
+`baselines.nsga2_recommended(polish=True)` (default) polishes before the pseudo-weights pick, so OURS and the
+front shown in the app are LP-efficient. This keeps the pseudo-weights *meaning* of the recommendation (same
+weights, same objective space) instead of a weighted-sum LP, which would jump to a single vertex. Raw
+`solve_nsga2` is untouched, so the NSGA-II-vs-LP front-quality experiments (E3.2/E3.4 HV, IGD) still measure
+the heuristic, not the polish. NSGA-III (risk mode) is unchanged. Polish adds ~0.7 s to a ~2.5 s solve.
+
+OURS, six E3.1 scenarios (water budget x price mode; `seed=42`; 10 ha). "LP gap" = how much more profit an LP
+earns at the same water and fert (the dominance the review found); after polish it is 0.000% everywhere.
+
+| scenario | raw profit | LP gap (raw) | polished profit | polished vs raw | water, fert (raw -> polished) |
+|---|---|---|---|---|---|
+| tight / market | 144,925 | 2.04% | 158,746 | +9.5%* | 35,099 -> 37,863 m3; 796 -> 796 kg |
+| current / market | 203,433 | 0.78% | 205,016 | +0.8% | 49,780 m3; 953 kg (unchanged) |
+| relaxed / market | 253,513 | 1.86% | 258,218 | +1.9% | 62,935 m3; 1,226 kg (unchanged) |
+| tight / msp_floor | 207,318 | 0.19% | 207,715 | +0.2% | 38,726 m3; 558 kg (unchanged) |
+| current / msp_floor | 264,841 | 0.10% | 265,118 | +0.1% | 52,285 m3; 862 kg (unchanged) |
+| relaxed / msp_floor | 299,924 | 0.47% | 301,340 | +0.5% | 61,033 m3; 1,113 -> 1,082 kg |
+
+\* tight/market: the polished front is differently shaped, so the pseudo-weights pick moves along it (+7.9%
+water, +9.5% profit); that row mixes the polish gain (2.0%) with a different trade-off point.
+The review quoted 0.6-3.5%; on the current economics the measured LP gap is 0.1-2.0%.
+
+New tests: `test_ours_is_not_dominated_by_an_lp_at_same_water_and_fert` (3 water budgets, real params: no LP
+at <= OURS water and <= OURS fert earns strictly more) and
+`test_polish_front_lifts_dominated_points_to_the_lp_frontier` (data-free toy). `94_seed_robustness.py` now
+measures the allocation std of the *polished* recommendation (HV stays on the raw front).

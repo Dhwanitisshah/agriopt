@@ -31,7 +31,7 @@ from agriopt.config import CROPS, REPORTS_RESULTS
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
 from agriopt.optim.risk import build_risk_inputs
-from agriopt.optim.solvers import recommend, solve_nsga2, solve_nsga3
+from agriopt.optim.solvers import polish_front, recommend, solve_nsga2, solve_nsga3
 
 SEEDS = list(range(10))
 LAND_HA = 10.0
@@ -109,8 +109,10 @@ def main() -> None:
         X, F, _ = solve_nsga2(scenario, params_df, seed=seed)
         nsga2_fronts.append(F)
         if len(F) > 0:
-            idx = recommend(F)
-            nsga2_X_rec.append(X[idx])
+            # HV above is of the RAW NSGA-II front (search quality); the recommended
+            # plan the product shows is the LP-polished one (baselines.nsga2_recommended).
+            Xp, Fp = polish_front(X, F, scenario, params_df)
+            nsga2_X_rec.append(Xp[recommend(Fp)])
         print(f"  seed={seed}: front size={len(F)}")
 
     hv_nsga2 = hv_for_fronts(nsga2_fronts)

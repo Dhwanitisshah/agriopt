@@ -196,6 +196,85 @@ def exact_front_lp(scenario: Scenario, n: int = 50, params_df: pd.DataFrame | No
     return np.array(X_rows), np.array(F_rows)
 
 
+# --- d2) LP polish of a (heuristic) front --------------------------------------
+
+POLISH_EPS = 1e-7  # relative slack on the water/fert caps, so a feasible NSGA point can't make its own polish LP infeasible
+
+
+def polish_front(X: np.ndarray, F: np.ndarray, scenario: Scenario, params_df: pd.DataFrame):
+    """Replace every point of a 3-objective front (profit, water, fert) by the
+    exact LP optimum with the same water and fert caps.
+
+    Profit, water and fert are all linear in x, so the problem is an LP and
+    NSGA-II's finite-generation points are generically dominated: at the
+    same water and fertilizer an LP earns more (0.6-3.5% on the committed
+    scenarios). For each point this solves, lexicographically,
+      1. max profit        s.t. water <= w_i, fert <= f_i (+ all scenario constraints)
+      2. min water         s.t. profit >= p*            (+ fert cap)
+      3. min fert          s.t. profit >= p*, water <= w*
+    so each polished point is Pareto-efficient (no slack left in water/fert),
+    not merely weakly better than the original. Points that collapse onto the
+    same vertex are de-duplicated and dominated survivors are dropped.
+
+    Returns (X', F') with F' columns [profit (positive), water, fert]. The
+    raw NSGA-II front stays available from solve_nsga2 -- the front-quality
+    experiments (E3.2/E3.4) compare THAT against the LP reference and must not
+    be polished."""
+    X = np.atleast_2d(np.asarray(X, dtype=float))
+    F = np.atleast_2d(np.asarray(F, dtype=float))
+    if len(X) == 0:
+        return X, F
+
+    _, profit, water, fert, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
+    water_row = 2  # row order from _lp_arrays: [kharif, rabi, water, -food]
+
+    X_out, F_out = [], []
+    for x0, f0 in zip(X, F):
+        w_cap = min(scenario.water_budget_m3, f0[1] * (1 + POLISH_EPS) + POLISH_EPS)
+        f_cap = f0[2] * (1 + POLISH_EPS) + POLISH_EPS
+
+        b1 = base_b.copy()
+        b1[water_row] = w_cap
+        A1 = np.vstack([base_A, fert])
+        b1 = np.append(b1, f_cap)
+        r1 = linprog(-profit, A_ub=A1, b_ub=b1, bounds=bounds, method="highs")
+        if not r1.success:  # numerical edge: keep the original point rather than drop it
+            X_out.append(x0)
+            F_out.append(f0)
+            continue
+        p_star = float(profit @ r1.x)
+        p_floor = p_star - POLISH_EPS * max(1.0, abs(p_star))
+
+        A2 = np.vstack([A1, -profit])
+        b2 = np.append(b1, -p_floor)
+        r2 = linprog(water, A_ub=A2, b_ub=b2, bounds=bounds, method="highs")
+        x_best = r1.x
+        if r2.success:
+            x_best = r2.x
+            b3 = b2.copy()
+            b3[water_row] = float(water @ r2.x) * (1 + POLISH_EPS) + POLISH_EPS
+            r3 = linprog(fert, A_ub=A2, b_ub=b3, bounds=bounds, method="highs")
+            if r3.success:
+                x_best = r3.x
+        X_out.append(np.clip(x_best, 0.0, None))
+        F_out.append([float(profit @ x_best), float(water @ x_best), float(fert @ x_best)])
+
+    X_out = np.array(X_out)
+    F_out = np.array(F_out)
+
+    # de-duplicate (many NSGA points land on the same LP vertex), then drop dominated
+    _, keep_idx = np.unique(np.round(F_out, 6), axis=0, return_index=True)
+    keep_idx = np.sort(keep_idx)
+    X_out, F_out = X_out[keep_idx], F_out[keep_idx]
+    M = np.column_stack([-F_out[:, 0], F_out[:, 1], F_out[:, 2]])
+    dominated = np.zeros(len(M), dtype=bool)
+    for i in range(len(M)):
+        le = np.all(M <= M[i] + 1e-9, axis=1)
+        lt = np.any(M < M[i] - 1e-9, axis=1)
+        dominated[i] = bool((le & lt).any())
+    return X_out[~dominated], F_out[~dominated]
+
+
 # --- e) Recommend one solution from a Pareto front via pseudo-weights -----------
 
 

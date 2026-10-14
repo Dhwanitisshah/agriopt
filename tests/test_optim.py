@@ -9,7 +9,7 @@ needs_data = pytest.mark.needs_data
 from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, profit_max, same_profit_min_water
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
-from agriopt.optim.solvers import solve_lp_profit_max, solve_nsga2
+from agriopt.optim.solvers import _lp_arrays, polish_front, solve_lp_profit_max, solve_nsga2
 
 TOL = 1e-6
 
@@ -114,6 +114,58 @@ def test_rabi_constraint_wheat_sugarcane_cotton_tur(params, scenario):
 
     for x in X_front:
         assert x[rabi_idx].sum() <= scen.land_ha + 1e-3
+
+
+def _lp_profit_at_caps(params_df, scen, water_cap, fert_cap):
+    """Exact max profit over every allocation that uses <= water_cap and <= fert_cap."""
+    from scipy.optimize import linprog
+
+    _, profit, _, fert, A, b, bounds = _lp_arrays(params_df, scen)
+    b = b.copy()
+    b[2] = min(b[2], water_cap)
+    r = linprog(-profit, A_ub=np.vstack([A, fert]), b_ub=np.append(b, fert_cap), bounds=bounds, method="highs")
+    assert r.success
+    return -r.fun
+
+
+@needs_data
+@pytest.mark.parametrize("water_mult", [0.7, 1.0, 1.3])
+def test_ours_is_not_dominated_by_an_lp_at_same_water_and_fert(params, scenario, water_mult):
+    """The problem has 3 LINEAR objectives, so a raw NSGA-II point is generically
+    dominated by the LP optimum at its own water and fertilizer. The recommendation
+    must be LP-polished: no allocation using <= OURS water and <= OURS fert earns
+    strictly more profit."""
+    base, _ = scenario
+    scen = Scenario(water_budget_m3=base.water_budget_m3 * water_mult, land_ha=base.land_ha)
+    x4, _, _, _ = nsga2_recommended(params, scen)
+    r = evaluate(x4, params, scen)
+    assert r["feasible"]
+    best = _lp_profit_at_caps(params, scen, r["water_m3"] * (1 + 1e-6), r["fert_kg"] * (1 + 1e-6))
+    assert best <= r["profit"] * (1 + 1e-6) + 1e-3, f"LP earns {best:,.0f} vs OURS {r['profit']:,.0f} at same water+fert"
+
+
+def test_polish_front_lifts_dominated_points_to_the_lp_frontier():
+    toy_params = pd.DataFrame(
+        {
+            "profit_ha": [100.0, 60.0, 30.0],
+            "water_m3_ha": [10.0, 4.0, 1.0],
+            "fert_kg_ha": [5.0, 2.0, 1.0],
+            "seasons_occupied": [{"kharif"}, {"kharif"}, {"kharif"}],
+        },
+        index=["a", "b", "c"],
+    )
+    scen = Scenario(water_budget_m3=1e6, land_ha=10.0, food_share_min=0.0, max_share=1.0)
+    # a deliberately sloppy "NSGA-II" point: 3 ha of a + 3 ha of b, 4 ha idle
+    x_raw = np.array([[3.0, 3.0, 0.0]])
+    F_raw = np.array([[3 * 100 + 3 * 60, 3 * 10 + 3 * 4, 3 * 5 + 3 * 2]], dtype=float)
+
+    X, F = polish_front(x_raw, F_raw, scen, toy_params)
+
+    assert len(X) == 1
+    assert F[0, 1] <= F_raw[0, 1] + 1e-6 and F[0, 2] <= F_raw[0, 2] + 1e-6  # never uses more water or fert
+    assert F[0, 0] > F_raw[0, 0] + 1.0  # but earns more
+    best = _lp_profit_at_caps(toy_params, scen, F_raw[0, 1] * (1 + 1e-6), F_raw[0, 2] * (1 + 1e-6))
+    assert F[0, 0] == pytest.approx(best, rel=1e-6)
 
 
 def test_toy_2crop_analytical_optimum():

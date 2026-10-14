@@ -6,7 +6,9 @@ B1 current_mix: historical Maharashtra area share, scaled to fit the
 B2 profit_max: LP profit maximization (solvers.solve_lp_profit_max).
 B3 same_profit_min_water: LP epsilon-constraint, min water at B1's profit
    (solvers.solve_lp_eps).
-OURS nsga2_recommended: pseudo-weights pick from the NSGA-II front.
+OURS nsga2_recommended: pseudo-weights pick from the NSGA-II front after every
+   point is LP-polished (profit, water, fert are all linear, so a raw NSGA-II
+   point is dominated by the LP optimum at the same water and fertilizer).
 """
 from __future__ import annotations
 
@@ -15,7 +17,7 @@ import pandas as pd
 
 from agriopt.config import CROP_NAME_MAP, STATE, YIELD_CLEAN_PARQUET
 from agriopt.optim.problem import Scenario, food_requirement, food_share as food_share_of, food_weights
-from agriopt.optim.solvers import recommend, solve_lp_eps, solve_lp_profit_max, solve_nsga2
+from agriopt.optim.solvers import polish_front, recommend, solve_lp_eps, solve_lp_profit_max, solve_nsga2
 
 CANON_TO_YIELD_NAME = {k: v["yield"] for k, v in CROP_NAME_MAP.items()}
 
@@ -158,11 +160,25 @@ def same_profit_min_water(params_df: pd.DataFrame, scenario: Scenario, min_profi
 
 
 def nsga2_recommended(
-    params_df: pd.DataFrame, scenario: Scenario, weights=(0.5, 0.3, 0.2), pop: int = 100, gens: int = 200, seed: int = 42
+    params_df: pd.DataFrame,
+    scenario: Scenario,
+    weights=(0.5, 0.3, 0.2),
+    pop: int = 100,
+    gens: int = 200,
+    seed: int = 42,
+    polish: bool = True,
 ) -> tuple[np.ndarray | None, np.ndarray, np.ndarray, float]:
-    """Returns (x_recommended, X_front, F_front, runtime)."""
+    """Returns (x_recommended, X_front, F_front, runtime).
+
+    With `polish=True` (default) the NSGA-II front is LP-polished before the
+    pseudo-weights pick (see solvers.polish_front), so the recommendation --
+    and the front returned for display -- are Pareto-efficient rather than
+    merely the best NSGA-II found in `gens` generations. `polish=False` gives
+    the raw heuristic front. runtime covers the NSGA-II search only."""
     X, F, runtime = solve_nsga2(scenario, params_df, pop=pop, gens=gens, seed=seed)
     if len(X) == 0:
         return None, X, F, runtime
+    if polish:
+        X, F = polish_front(X, F, scenario, params_df)
     idx = recommend(F, weights)
     return X[idx], X, F, runtime
