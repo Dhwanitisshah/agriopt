@@ -5,7 +5,9 @@ Constraints (pymoo G <= 0 form):
   kharif land: sum(x over kharif-occupying crops) - LAND <= 0
   rabi land:   sum(x over rabi-occupying crops)   - LAND <= 0
   water:       water_m3 - WATER_BUDGET_M3 <= 0
-  food:        FOOD_SHARE_MIN*LAND - sum(x over FOOD_CROPS) <= 0
+  food:        FOOD_SHARE_MIN*(2*LAND) - sum(x_i * n_seasons_i over FOOD_CROPS) <= 0
+               i.e. food crops must fill at least FOOD_SHARE_MIN of the
+               farm's kharif+rabi season-hectares (see food_weights()).
 """
 from __future__ import annotations
 
@@ -44,6 +46,27 @@ class Scenario:
     region: str = "maharashtra"
 
 
+def food_weights(params_df: pd.DataFrame) -> np.ndarray:
+    """Season-hectares of food produced per hectare allocated to each crop:
+    a food crop counts once per season it occupies (rice=1, tur=2), a
+    non-food crop counts 0. Counting plain hectares let the minimum be met
+    by e.g. 1.5 ha maize (kharif) + 1.5 ha wheat (rabi) on 10 ha while 85%
+    of each season grew non-food -- and could report food_share > 1."""
+    return np.array(
+        [float(len(params_df.loc[c, "seasons_occupied"])) if c in FOOD_CROPS else 0.0 for c in params_df.index]
+    )
+
+
+def food_requirement(scenario: "Scenario") -> float:
+    """Minimum food season-hectares: share x (kharif + rabi capacity)."""
+    return scenario.food_share_min * 2.0 * scenario.land_ha
+
+
+def food_share(x: np.ndarray, params_df: pd.DataFrame, land_ha: float) -> float:
+    """Fraction of the farm's season-hectares (2 x land) in food crops, in [0, 1]."""
+    return float(np.asarray(x, dtype=float) @ food_weights(params_df)) / (2.0 * land_ha) if land_ha else float("nan")
+
+
 class CropAllocationProblem(Problem):
     """Vectorized pymoo Problem: n_var = n_crops, n_obj = 3, n_constr = 4."""
 
@@ -62,7 +85,7 @@ class CropAllocationProblem(Problem):
         self.fert = params_df["fert_kg_ha"].to_numpy(dtype=float)
         self.kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in self.crops])
         self.rabi_mask = np.array(["rabi" in params_df.loc[c, "seasons_occupied"] for c in self.crops])
-        self.food_mask = np.array([c in FOOD_CROPS for c in self.crops])
+        self.food_w = food_weights(params_df)
 
     def _evaluate(self, X, out, *args, **kwargs):
         profit = X @ self.profit
@@ -74,6 +97,6 @@ class CropAllocationProblem(Problem):
         g_kharif = X[:, self.kharif_mask].sum(axis=1) - self.scenario.land_ha
         g_rabi = X[:, self.rabi_mask].sum(axis=1) - self.scenario.land_ha
         g_water = water - self.scenario.water_budget_m3
-        g_food = self.scenario.food_share_min * self.scenario.land_ha - X[:, self.food_mask].sum(axis=1)
+        g_food = food_requirement(self.scenario) - X @ self.food_w
 
         out["G"] = np.column_stack([g_kharif, g_rabi, g_water, g_food])

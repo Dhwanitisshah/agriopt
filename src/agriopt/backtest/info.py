@@ -46,7 +46,7 @@ from agriopt.models.yield_model import (
     load_model_frame,
     tune_rf,
 )
-from agriopt.optim.params import MM_TO_M3_PER_HA, seasons_occupied
+from agriopt.optim.params import MM_TO_M3_PER_HA, SUGARCANE_REVENUE_CV, economic_row, seasons_occupied
 from agriopt.optim.risk import HARVEST_WINDOW_MONTHS, detrend_relative_deviation, nearest_psd
 from sklearn.ensemble import RandomForestRegressor
 
@@ -99,10 +99,6 @@ def cost_for_year(crop: str, year: int, msp_hist: pd.DataFrame | None = None, re
     ref_row = ref[ref["crop"] == crop].iloc[0]
     cost_2025 = float(ref_row["cost_rs_per_qtl"])
     msp_2025 = float(msp_hist.loc[(crop, 2025), "msp_rs_per_qtl"])
-    if crop == "sugarcane":
-        # sugarcane's crop_reference cost (173) is anchored to FRP 355, not
-        # an MSP -- same index rule, different anchor column, per the brief.
-        msp_2025 = float(msp_hist.loc[(crop, 2025), "msp_rs_per_qtl"])
     cost_t = cost_2025 * (float(msp_t) / msp_2025)
     return float(cost_t), "msp_index"
 
@@ -240,27 +236,32 @@ def _base_params_row(
     crop: str,
     yield_qtl_ha: float,
     price: float,
-    cost_ha: float,
+    cost_rs_per_qtl: float,
     water_ref: pd.DataFrame,
     water_basis: str = "total_need",
     rainfall_scenario: str = "normal",
     region: str = "maharashtra",
 ) -> dict:
-    profit_ha = yield_qtl_ha * price - cost_ha
+    """Backtest rows go through the SAME economic_row() as the live
+    pipeline. `cost_rs_per_qtl` is what cost_for_year() returns (Rs/quintal);
+    it used to be passed straight in as a per-hectare cost, so every backtest
+    "profit" was really revenue minus ~Rs 1-5k. economic_row() multiplies by
+    yield, so that can't happen again."""
     if water_basis == "net_irrigation":
         water_mm_val = net_irrigation_mm(crop, rainfall_scenario, water_ref, region)
     else:
         water_mm_val = water_mm(crop, water_ref)
-    return {
-        "crop": crop,
-        "yield_qtl_ha": yield_qtl_ha,
-        "price": price,
-        "cost_ha": cost_ha,
-        "profit_ha": profit_ha,
-        "water_m3_ha": water_mm_val * MM_TO_M3_PER_HA,
-        "fert_kg_ha": fert_total_kg_ha(crop, water_ref),
-        "seasons_occupied": seasons_occupied(crop),
-    }
+    row = economic_row(
+        crop,
+        yield_per_cycle_qtl_ha=yield_qtl_ha,
+        gross_price=price,
+        cost_rs_per_qtl=cost_rs_per_qtl,
+        water_m3_per_cycle=water_mm_val * MM_TO_M3_PER_HA,
+        fert_kg_per_cycle=fert_total_kg_ha(crop, water_ref),
+        ref=water_ref,
+    )
+    row["seasons_occupied"] = seasons_occupied(crop)
+    return row
 
 
 def build_forecast_params_df(
@@ -290,11 +291,14 @@ def build_forecast_params_df(
     for crop in crops:
         yield_qtl_ha = yields[crop]["value"]
         price = prices[crop]["value"]
-        cost_ha, cost_method = cost_for_year(crop, t, msp_hist, ref)
-        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario, region)
+        cost_qtl, cost_method = cost_for_year(crop, t, msp_hist, ref)
+        row = _base_params_row(crop, yield_qtl_ha, price, cost_qtl, ref, water_basis, rainfall_scenario, region)
         origin_month = prices[crop]["origin_month"]
         origin = pd.Timestamp(origin_month) if origin_month else pd.Timestamp(year=t, month=DECISION_MONTH[MAIN_SEASON[crop]] if crop != "sugarcane" else 6, day=1)
-        row["profit_std_ha"] = yield_qtl_ha * _price_std_leakfree(crop, origin, wide)
+        if crop == "sugarcane":
+            row["profit_std_ha"] = row["yield_qtl_ha"] * row["price"] * SUGARCANE_REVENUE_CV
+        else:
+            row["profit_std_ha"] = row["yield_qtl_ha"] * _price_std_leakfree(crop, origin, wide)
         row["cost_method"] = cost_method
         rows.append(row)
 
@@ -362,13 +366,28 @@ def build_realized_params_df(
         if yield_qtl_ha is None or price is None:
             missing.append(crop)
             continue
-        cost_ha, _ = cost_for_year(crop, t, msp_hist, ref)
-        row = _base_params_row(crop, yield_qtl_ha, price, cost_ha, ref, water_basis, rainfall_scenario, region)
+        cost_qtl, _ = cost_for_year(crop, t, msp_hist, ref)
+        row = _base_params_row(crop, yield_qtl_ha, price, cost_qtl, ref, water_basis, rainfall_scenario, region)
         row["profit_std_ha"] = 0.0  # not used for realized evaluation (no forward-looking risk on an outcome)
         rows.append(row)
 
     params_df = pd.DataFrame(rows).set_index("crop") if rows else pd.DataFrame()
     return params_df, missing
+
+
+def commit_planned_costs(realized_params: pd.DataFrame, forecast_params: pd.DataFrame) -> pd.DataFrame:
+    """Cost of cultivation (seed, fertilizer, labour, ...) is spent per
+    hectare at sowing, before yield is known, so the realized outcome uses
+    the PLANNED per-ha cost, not cost_rs_per_qtl x realized yield. Keeps the
+    yield/price/interaction decomposition clean (cost effect == 0 by
+    definition) and avoids a bad harvest "saving" cost."""
+    out = realized_params.copy()
+    if out.empty:
+        return out
+    common = out.index.intersection(forecast_params.index)
+    out.loc[common, "cost_ha"] = forecast_params.loc[common, "cost_ha"]
+    out["profit_ha"] = out["yield_qtl_ha"] * out["price"] - out["cost_ha"]
+    return out
 
 
 # --- 4) B1 current mix, leak-free (years t-5..t-1 only) --------------------

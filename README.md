@@ -67,12 +67,20 @@ Headline numbers below are pulled directly from `reports/results/RESULTS_INDEX.m
 consolidated results index spanning all phases of this project; see that file (and the
 experiment-specific `.md` files it cites) for full detail and every caveat.
 
+> **Rows marked ⚠ are superseded and must be re-run.** They were produced before two fixes
+> (Oct 2026): (1) the backtest subtracted cost of cultivation in ₹/quintal as if it were ₹/ha,
+> so backtest "profit" was effectively revenue; (2) sugarcane was compared per 15-month crop
+> cycle against single-season crops and at gross FRP. Regenerating them needs the full
+> (gitignored) dataset: `60_backtest.py`, `61_backtest_v2.py`, `30_run_optimizer.py`,
+> `70_water_basis_net.py`, `71_water_region.py`, then `40_build_cache.py`. The live app and its
+> cached presets already use the corrected economics (`scripts/42_patch_cache_economics.py`).
+
 | Result | Headline number | Caveat |
 |---|---|---|
-| Profit-per-water vs current mix (decision backtest, 2016-2019) | OURS: mean profit per 1,000 m³ water = ₹9,051-9,271 vs current-mix (B1) ₹5,636 | Realized-outcome metrics computed over **n=4 years (2016-2019)**, not the intended 5 -- Maharashtra's yield data has zero rows for 2020. Directional, not statistically conclusive. |
-| Water-matched capture ratio (`capture_ratio_w`) | OURS ≈ 0.966-0.966 of the water-matched oracle's profit; MODEL_B (risk-aware) ≈ 0.862-0.880 | Same n=4 caveat as above. |
-| Same-profit-less-water (B3 vs B1) | B3 matches B1's profit (+0.0%) using **57.5% less water** (tight/market scenario) | B2 (profit-max) beats B1 by +108.4% profit but concentrates into ~2 crops (not diversified). |
-| Region comparison (Konkan vs Marathwada, net-irrigation basis) | OURS profit: Marathwada ₹253,960 (water 20,845 m³) vs Konkan ₹232,078 (water 13,365 m³) | Marathwada's drier normal-year rainfall raises rice's net irrigation need to 232mm vs Konkan's 200mm; region changes water cost, not the crop's agronomic need. |
+| ⚠ Profit-per-water vs current mix (decision backtest, 2016-2019) | OURS: mean profit per 1,000 m³ water = ₹9,051-9,271 vs current-mix (B1) ₹5,636 | Realized-outcome metrics computed over **n=4 years (2016-2019)**, not the intended 5 -- Maharashtra's yield data has zero rows for 2020. Directional, not statistically conclusive. |
+| ⚠ Water-matched capture ratio (`capture_ratio_w`) | OURS ≈ 0.966 of the water-matched oracle's profit; MODEL_B (risk-aware) ≈ 0.862-0.880 | Same n=4 caveat as above. |
+| ⚠ Same-profit-less-water (B3 vs B1) | B3 matches B1's profit (+0.0%) using **57.5% less water** (tight/market scenario) | B2 (profit-max) beats B1 by +108.4% profit but concentrates into ~2 crops (not diversified). |
+| ⚠ Region comparison (Konkan vs Marathwada, net-irrigation basis) | OURS profit: Marathwada ₹253,960 (water 20,845 m³) vs Konkan ₹232,078 (water 13,365 m³) | Marathwada's drier normal-year rainfall raises rice's net irrigation need to 232mm vs Konkan's 200mm; region changes water cost, not the crop's agronomic need. |
 | Yield model significance (Wilcoxon, Maharashtra test, n=152) | RandomForest significantly beats XGBoost (p=0.009) and Ridge (p<0.001) | RF vs Baseline-Mean is **not** significant (p=0.469) -- "RF is best" is not uniformly supported. |
 | Price model significance (Diebold-Mariano, pooled) | Naive significantly beats XGBoost at h=6 (p=0.031) and h=12 (p=0.020) | Per-crop DM tests (n~36-45) are noisier/less powered than pooled (n~252-315); pooled is the headline. |
 | Yield conformal intervals (90% nominal) | Overall Maharashtra empirical coverage = 0.941 (mean width 2.53 t/ha) | Per-crop coverage varies (cotton/tur measured at 0.75) -- always check per-crop before trusting one crop's interval. |
@@ -82,7 +90,28 @@ experiment-specific `.md` files it cites) for full detail and every caveat.
 - **Yield**: Kaggle [crop-yield-in-indian-states-dataset](https://www.kaggle.com/datasets) (APY-style: area/production/yield by state/crop/season/year)
 - **Prices**: [CEDA Agmarknet API](https://api.ceda.ashoka.edu.in/documentation/) (primary, mandi modal prices); Kaggle mandi CSV (secondary, few crops)
 - **Cost of cultivation & MSP**: PIB / Dept. of Agriculture & Farmers Welfare Kharif/Rabi Marketing Season price releases (see `data/reference/msp_history.csv`'s `source_url` column for the exact PDF cited per crop-year, e.g. `desagri.gov.in/wp-content/uploads/...MSP-kharif-2016-17.pdf`)
-- **Sugarcane price**: CCEA Fair and Remunerative Price (FRP), not MSP -- see `admin_price_rs_per_qtl` in `data/reference/crop_reference.csv`
+- **Sugarcane price**: CCEA Fair and Remunerative Price (FRP), not MSP -- see `admin_price_rs_per_qtl` in `data/reference/crop_reference.csv`.
+  The farmer is paid FRP minus harvesting & transport (H&T), so the model uses FRP − ₹75/qtl
+  (₹750/t H&T deducted in the Pune/Nashik divisions in 2023-24, per [ChiniMandi](https://www.chinimandi.com/sugarcane-pricing-policies-an-analysis-of-maharashtras-frp-formula/));
+  see `price_deduction_rs_per_qtl`.
+
+## How per-hectare economics are computed
+
+Every row the optimizer sees -- live app, cache, and backtest -- is built by one function,
+`agriopt.optim.params.economic_row`, per hectare **per land-year**:
+
+- `cost_ha = cost_rs_per_qtl × yield_qtl_ha` (cost is published per quintal; never mix the units).
+- `price` = farm-gate price (gross MSP/FRP/mandi price minus `price_deduction_rs_per_qtl`).
+- Crops whose cycle is longer than 12 months tie up land for longer than one land-year, so
+  yield, water and fertilizer are scaled by `12 / cycle_months`. Sugarcane uses 15 months, a
+  middle value for Maharashtra's adsali (~18), pre-seasonal (~15) and suru (~12) plantings.
+- Sugarcane's profit risk is its measured revenue CV (0.097, yield × FRP over 21 years), not 0.
+- The food-security minimum counts **season-hectares**: a food crop counts once per season it
+  occupies, against a capacity of 2 × land, so `food_share` is always in [0, 1].
+
+Effect on the cached presets: sugarcane's share of the recommended plan's profit fell from
+59-81% to 3-26%, and the profit-max baseline no longer plants sugarcane in the Marathwada
+drought preset (1.42 ha → 0).
 - **Crop water need**: FAO Irrigation and Drainage Paper (TM3) crop water requirement tables
 - **Fertilizer dose**: FAO (2005) *Fertilizer use by crop in India*, Table 13 (soybean: ICAR-IISS recommended dose)
 - **Rainfall**: Kaggle `rajanand/rainfall-in-india` (IMD sub-divisional monthly rainfall, 1901-2015)
@@ -171,13 +200,6 @@ theme. See `requirements.txt` for the full dev/training dependency set.
 - Future work: district-level yield/cost data, state-specific (not all-India) cost of cultivation,
   a citable percolation/seepage figure for puddled rice, and extending the backtest window past
   2020 once more recent Maharashtra yield data becomes available.
-
-## Screenshots
-
-`[TODO: could not capture live screenshots in this environment -- see the agent's final report
-for why. Capture 3 screenshots (Recommendation tab, Trade-offs tab, Regional view tab) from a
-locally running `streamlit run app\streamlit_app.py` and save them to docs/img/ before replacing
-this placeholder.]`
 
 ## Tests
 

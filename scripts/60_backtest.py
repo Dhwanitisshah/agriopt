@@ -36,7 +36,7 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
-from agriopt.backtest.info import build_forecast_params_df, build_realized_params_df, build_risk_inputs_leakfree, current_mix_leakfree
+from agriopt.backtest.info import build_forecast_params_df, build_realized_params_df, build_risk_inputs_leakfree, commit_planned_costs, current_mix_leakfree
 from agriopt.config import CROPS, REPORTS_RESULTS
 from agriopt.optim.baselines import evaluate, nsga2_recommended
 from agriopt.optim.problem import Scenario
@@ -83,6 +83,7 @@ def run_year(t: int, water_basis: str = "total_need", rainfall_scenario: str = "
     scripts/70_water_basis_net.py and reports/results/water_basis_comparison.md."""
     forecast_params, finfo = build_forecast_params_df(t, crops=CROPS, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
     realized_params, missing_realized = build_realized_params_df(t, crops=CROPS, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
+    realized_params = commit_planned_costs(realized_params, forecast_params)
     R = (forecast_params["yield_qtl_ha"] * forecast_params["price"]).to_numpy(dtype=float)
     risk_inputs = build_risk_inputs_leakfree(t - 1, crops=CROPS, R=R)
 

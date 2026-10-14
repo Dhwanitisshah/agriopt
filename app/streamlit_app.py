@@ -41,7 +41,7 @@ from app.components.regional_tab import render_regional_tab
 from app.components.risk_tab import render_risk_tab
 from app.components.sidebar import render_sidebar
 from app.components.tradeoffs import render_tradeoffs_tab
-from app.pipeline import apply_price_shocks, run_pipeline
+from app.pipeline import apply_price_shocks, gross_frp, run_pipeline
 from app.presets import DEFAULT_RAINFALL_SCENARIO, DEFAULT_REGION, DEFAULT_WATER_BASIS
 
 st.set_page_config(page_title="AgriOpt", page_icon=":material/agriculture:", layout="wide")
@@ -106,7 +106,7 @@ if "scenario_result" not in st.session_state:
 # result instantly instead of re-running NSGA-II/NSGA-III -- checked on
 # every rerun (not just Run clicks), so it applies right after a preset
 # button fills the sidebar, before the user even presses Run.
-sugarcane_default_frp = float(params_market.loc["sugarcane", "price"]) if "sugarcane" in params_market.index else 0.0
+sugarcane_default_frp = gross_frp(params_market, fallback=0.0)
 matched_preset = appdata.match_preset(
     scenario,
     sidebar_inputs.priority,

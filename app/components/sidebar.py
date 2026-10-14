@@ -10,7 +10,7 @@ import streamlit as st
 
 from agriopt.config import CROPS
 from agriopt.optim.problem import Scenario
-from app.pipeline import current_mix_water, weights4_from_priority_and_risk_aversion, weights_from_priority
+from app.pipeline import current_mix_water, gross_frp, weights4_from_priority_and_risk_aversion, weights_from_priority
 from app.presets import (
     DEFAULT_FOOD_SHARE_MIN,
     DEFAULT_LAND_HA,
@@ -103,7 +103,15 @@ def render_sidebar(params_df_for_water_ref: pd.DataFrame, current_mix_share: dic
             key="water_budget_m3",
         )
 
-        food_share_min = st.slider("Min food-crop share", min_value=0.0, max_value=0.6, step=0.05, key="food_share_min")
+        food_share_min = st.slider(
+            "Min food-crop share",
+            min_value=0.0,
+            max_value=0.6,
+            step=0.05,
+            key="food_share_min",
+            help="Share of the farm's kharif + rabi cropping area (2 × land) that must be in food crops. "
+            "A crop counts once per season it occupies.",
+        )
         max_share = st.slider("Max share per crop", min_value=0.2, max_value=1.0, step=0.05, key="max_share")
 
         price_mode_label = st.selectbox("Price mode", ["Market (last observed)", "MSP floor"], key="price_mode_label")
@@ -174,7 +182,7 @@ def render_sidebar(params_df_for_water_ref: pd.DataFrame, current_mix_share: dic
 
         st.subheader("What-if: price shocks")
         price_multipliers = {}
-        sugarcane_default_frp = float(params_df_for_water_ref.loc["sugarcane", "price"]) if "sugarcane" in params_df_for_water_ref.index else 355.0
+        sugarcane_default_frp = gross_frp(params_df_for_water_ref)
         with st.expander("Per-crop price multipliers", expanded=False):
             for crop in CROPS:
                 if crop == "sugarcane":

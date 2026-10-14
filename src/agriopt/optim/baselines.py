@@ -13,8 +13,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from agriopt.config import CROP_NAME_MAP, FOOD_CROPS, STATE, YIELD_CLEAN_PARQUET
-from agriopt.optim.problem import Scenario
+from agriopt.config import CROP_NAME_MAP, STATE, YIELD_CLEAN_PARQUET
+from agriopt.optim.problem import Scenario, food_requirement, food_share as food_share_of, food_weights
 from agriopt.optim.solvers import recommend, solve_lp_eps, solve_lp_profit_max, solve_nsga2
 
 CANON_TO_YIELD_NAME = {k: v["yield"] for k, v in CROP_NAME_MAP.items()}
@@ -37,15 +37,15 @@ def evaluate(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> dict
     std_v = params_df["profit_std_ha"].to_numpy(dtype=float)
     kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in crops])
     rabi_mask = np.array(["rabi" in params_df.loc[c, "seasons_occupied"] for c in crops])
-    food_mask = np.array([c in FOOD_CROPS for c in crops])
+    food_w = food_weights(params_df)
 
     profit = float(x @ profit_v)
     water_m3 = float(x @ water_v)
     fert_kg = float(x @ fert_v)
     kharif_land = float(x[kharif_mask].sum())
     rabi_land = float(x[rabi_mask].sum())
-    food_land = float(x[food_mask].sum())
-    food_share = food_land / scenario.land_ha if scenario.land_ha else float("nan")
+    food_season_ha = float(x @ food_w)
+    food_share = food_share_of(x, params_df, scenario.land_ha)
     n_crops = int((x > 0.1).sum())
 
     # profit_risk = sqrt(sum((x_i * profit_std_i)^2)) -- treats each crop's
@@ -59,7 +59,7 @@ def evaluate(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> dict
         kharif_land <= scenario.land_ha + FEASIBILITY_TOL
         and rabi_land <= scenario.land_ha + FEASIBILITY_TOL
         and water_m3 <= scenario.water_budget_m3 + FEASIBILITY_TOL
-        and food_land >= scenario.food_share_min * scenario.land_ha - FEASIBILITY_TOL
+        and food_season_ha >= food_requirement(scenario) - FEASIBILITY_TOL
         and (x >= -FEASIBILITY_TOL).all()
         and (x <= scenario.max_share * scenario.land_ha + FEASIBILITY_TOL).all()
     )

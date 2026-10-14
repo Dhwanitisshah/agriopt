@@ -12,8 +12,7 @@ import numpy as np
 import pandas as pd
 from pymoo.core.problem import Problem
 
-from agriopt.config import FOOD_CROPS
-from agriopt.optim.problem import Scenario
+from agriopt.optim.problem import Scenario, food_requirement, food_weights
 from agriopt.optim.risk import portfolio_risk_vectorized
 
 
@@ -36,7 +35,7 @@ class CropAllocationProblemRisk(Problem):
         self.fert = params_df["fert_kg_ha"].to_numpy(dtype=float)
         self.kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in self.crops])
         self.rabi_mask = np.array(["rabi" in params_df.loc[c, "seasons_occupied"] for c in self.crops])
-        self.food_mask = np.array([c in FOOD_CROPS for c in self.crops])
+        self.food_w = food_weights(params_df)
 
     def _evaluate(self, X, out, *args, **kwargs):
         profit = X @ self.profit
@@ -49,6 +48,6 @@ class CropAllocationProblemRisk(Problem):
         g_kharif = X[:, self.kharif_mask].sum(axis=1) - self.scenario.land_ha
         g_rabi = X[:, self.rabi_mask].sum(axis=1) - self.scenario.land_ha
         g_water = water - self.scenario.water_budget_m3
-        g_food = self.scenario.food_share_min * self.scenario.land_ha - X[:, self.food_mask].sum(axis=1)
+        g_food = food_requirement(self.scenario) - X @ self.food_w
 
         out["G"] = np.column_stack([g_kharif, g_rabi, g_water, g_food])

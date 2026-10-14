@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-pytestmark = pytest.mark.needs_data  # Phase 10: needs gitignored data/raw or models/*.joblib -- see pyproject.toml's marker registration
+# needs_data is applied per test (not module-wide) so the data-free toy
+# test below still runs in CI.
+needs_data = pytest.mark.needs_data
 
 from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, profit_max, same_profit_min_water
 from agriopt.optim.params import build_crop_params
@@ -44,6 +46,7 @@ def _constraint_margins(x, params_df, scen):
     return kharif, rabi, water, food
 
 
+@needs_data
 def test_all_returned_solutions_satisfy_constraints(params, scenario):
     scen, x1 = scenario
 
@@ -61,6 +64,7 @@ def test_all_returned_solutions_satisfy_constraints(params, scenario):
             assert g <= 1e-4, f"NSGA-II front point {i} violates a constraint"
 
 
+@needs_data
 def test_b2_profit_dominates_nsga2_front(params, scenario):
     scen, _ = scenario
     _, b2_profit = solve_lp_profit_max(scen, params)
@@ -72,6 +76,7 @@ def test_b2_profit_dominates_nsga2_front(params, scenario):
         assert b2_profit >= max_nsga_profit - 1e-2 * max(1.0, abs(max_nsga_profit))
 
 
+@needs_data
 def test_b3_matches_b1_profit_with_less_or_equal_water(params, scenario):
     scen, x1 = scenario
     r1 = evaluate(x1, params, scen)
@@ -83,6 +88,7 @@ def test_b3_matches_b1_profit_with_less_or_equal_water(params, scenario):
     assert r3["water_m3"] <= r1["water_m3"] + 1e-3 * max(1.0, r1["water_m3"])
 
 
+@needs_data
 def test_nsga2_deterministic_with_fixed_seed(params, scenario):
     scen, _ = scenario
     X1, F1, _ = solve_nsga2(scen, params, seed=7)
@@ -92,6 +98,7 @@ def test_nsga2_deterministic_with_fixed_seed(params, scenario):
     np.testing.assert_allclose(F1, F2)
 
 
+@needs_data
 def test_rabi_constraint_wheat_sugarcane_cotton_tur(params, scenario):
     scen, x1 = scenario
     crops = list(params.index)

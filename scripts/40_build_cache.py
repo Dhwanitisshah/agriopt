@@ -137,7 +137,9 @@ def _build_params_block(base_df_by_mode: dict[str, pd.DataFrame]) -> dict:
             for scenario in RAINFALL_SCENARIOS:
                 df = base_df.copy()
                 for crop in df.index:
-                    df.loc[crop, "water_m3_ha"] = net_irrigation_mm(crop, scenario, ref, region) * MM_TO_M3_PER_HA
+                    # per-cycle -> per land-year, same as economic_row()
+                    cycle = float(df.loc[crop, "cycle_months"]) if "cycle_months" in df.columns else 12.0
+                    df.loc[crop, "water_m3_ha"] = net_irrigation_mm(crop, scenario, ref, region) * MM_TO_M3_PER_HA * 12.0 / cycle
                 out[region]["net_irrigation"][scenario][mode] = _records_from_df(df)
     return out
 

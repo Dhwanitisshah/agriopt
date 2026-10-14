@@ -44,6 +44,21 @@ def weights4_from_priority_and_risk_aversion(priority: float, risk_aversion: flo
     return (profit_w * scale, water_w * scale, fert_w * scale, risk_w)
 
 
+def _deduction(params_df: pd.DataFrame, crop: str) -> float:
+    if "price_deduction_rs_per_qtl" not in params_df.columns:
+        return 0.0
+    v = params_df.loc[crop, "price_deduction_rs_per_qtl"]
+    return 0.0 if pd.isna(v) else float(v)
+
+
+def gross_frp(params_df: pd.DataFrame, fallback: float = 355.0) -> float:
+    """Sugarcane FRP as announced (gross, Rs/qtl) -- params_df stores the
+    net farm-gate price, so add the per-quintal deduction back for display."""
+    if "sugarcane" not in params_df.index:
+        return fallback
+    return float(params_df.loc["sugarcane", "price"]) + _deduction(params_df, "sugarcane")
+
+
 def apply_price_shocks(
     params_df: pd.DataFrame,
     multipliers: dict[str, float] | None = None,
@@ -68,11 +83,16 @@ def apply_price_shocks(
         out.loc[crop, "profit_std_ha"] = float(out.loc[crop, "profit_std_ha"]) * mult
 
     if sugarcane_frp_override is not None and "sugarcane" in out.index:
-        old_price = float(out.loc["sugarcane", "price"])
-        if old_price and sugarcane_frp_override != old_price:
-            scale = sugarcane_frp_override / old_price
-            out.loc["sugarcane", "price"] = float(sugarcane_frp_override)
-            out.loc["sugarcane", "profit_ha"] = float(out.loc["sugarcane", "yield_qtl_ha"]) * sugarcane_frp_override - float(out.loc["sugarcane", "cost_ha"])
+        # The override is the GROSS FRP the user sees (Rs/qtl); the farmer
+        # receives FRP minus harvesting & transport, which is what
+        # params_df["price"] holds -- see agriopt.optim.params.economic_row.
+        old_net = float(out.loc["sugarcane", "price"])
+        deduction = _deduction(out, "sugarcane")
+        if old_net and abs(sugarcane_frp_override - (old_net + deduction)) > 1e-9:
+            new_net = float(sugarcane_frp_override) - deduction
+            scale = new_net / old_net
+            out.loc["sugarcane", "price"] = new_net
+            out.loc["sugarcane", "profit_ha"] = float(out.loc["sugarcane", "yield_qtl_ha"]) * new_net - float(out.loc["sugarcane", "cost_ha"])
             out.loc["sugarcane", "profit_std_ha"] = float(out.loc["sugarcane", "profit_std_ha"]) * scale
 
     return out
@@ -240,5 +260,5 @@ def summary_sentence(r1: dict, r4: dict) -> str:
     return (
         f"The recommended allocation earns ₹{r4['profit']:,.0f} in profit ({profit_d:+.1f}% vs the current mix), "
         f"uses {r4['water_m3']:,.0f} m³ of water ({water_d:+.1f}%) and {r4['fert_kg']:,.0f} kg of fertilizer ({fert_d:+.1f}%), "
-        f"and keeps {r4['food_share']:.0%} of land in food crops."
+        f"and keeps {r4['food_share']:.0%} of its kharif + rabi cropping area in food crops."
     )

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from agriopt.config import FOOD_CROPS
-from agriopt.optim.problem import Scenario
+from agriopt.optim.problem import Scenario, food_requirement, food_weights
 
 TOL = 1e-3
 
@@ -41,8 +41,7 @@ def crop_reasons(
         for i, crop in enumerate(crops):
             risk_contrib[crop] = contrib[i] / total_var
 
-    food_land = float(x[[c in FOOD_CROPS for c in crops]].sum())
-    food_binding = food_land <= scenario.food_share_min * scenario.land_ha + TOL
+    food_binding = float(x @ food_weights(params_df)) <= food_requirement(scenario) + TOL
 
     reasons = {}
     for i, crop in enumerate(crops):
@@ -66,14 +65,13 @@ def binding_constraints(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenar
     crops = list(params_df.index)
     kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in crops])
     rabi_mask = np.array(["rabi" in params_df.loc[c, "seasons_occupied"] for c in crops])
-    food_mask = np.array([c in FOOD_CROPS for c in crops])
     water_v = params_df["water_m3_ha"].to_numpy(dtype=float)
 
     kharif_used = float(x[kharif_mask].sum())
     rabi_used = float(x[rabi_mask].sum())
     water_used = float(x @ water_v)
-    food_used = float(x[food_mask].sum())
-    food_limit = scenario.food_share_min * scenario.land_ha
+    food_used = float(x @ food_weights(params_df))  # season-hectares
+    food_limit = food_requirement(scenario)
 
     def binding(used, limit, tol_frac=0.01):
         return limit > 0 and used >= limit - max(TOL, tol_frac * limit)
@@ -82,5 +80,5 @@ def binding_constraints(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenar
         {"constraint": "Kharif land", "used": kharif_used, "limit": scenario.land_ha, "binding": binding(kharif_used, scenario.land_ha)},
         {"constraint": "Rabi land", "used": rabi_used, "limit": scenario.land_ha, "binding": binding(rabi_used, scenario.land_ha)},
         {"constraint": "Water budget", "used": water_used, "limit": scenario.water_budget_m3, "binding": binding(water_used, scenario.water_budget_m3)},
-        {"constraint": "Min food-crop share", "used": food_used, "limit": food_limit, "binding": food_used <= food_limit + TOL if food_limit > 0 else False},
+        {"constraint": "Min food-crop share (season-ha)", "used": food_used, "limit": food_limit, "binding": food_used <= food_limit + TOL if food_limit > 0 else False},
     ]

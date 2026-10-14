@@ -52,6 +52,86 @@ BOTH_SEASON_CROPS = {"sugarcane", "cotton", "tur"}
 SEASON_MAP = {"Kharif": "kharif", "Rabi": "rabi"}
 
 
+def _ref_value(ref: pd.DataFrame, crop: str, col: str, default: float) -> float:
+    """Optional crop_reference.csv column, with a default for older files."""
+    if col not in ref.columns:
+        return default
+    v = ref.loc[ref["crop"] == crop, col]
+    if v.empty or pd.isna(v.iloc[0]):
+        return default
+    return float(v.iloc[0])
+
+
+def economic_row(
+    crop: str,
+    yield_per_cycle_qtl_ha: float,
+    gross_price: float,
+    cost_rs_per_qtl: float,
+    water_m3_per_cycle: float,
+    fert_kg_per_cycle: float,
+    ref: pd.DataFrame,
+) -> dict:
+    """The ONE place per-hectare economics are assembled, so the live
+    pipeline, the backtest and the cache patcher can't drift apart.
+
+    Everything is returned per hectare per LAND-YEAR, which is what the
+    optimizer's two-season land model actually allocates:
+
+    * cost: cost_rs_per_qtl (Rs/quintal) x yield (qtl/ha) -> Rs/ha. Never pass
+      a per-quintal cost in as a per-hectare one (the old backtest bug).
+    * price: farm-gate price = gross (MSP/FRP/mandi) minus any per-quintal
+      deduction the farmer never receives (sugarcane: harvesting & transport,
+      `price_deduction_rs_per_qtl`).
+    * cycle: crops whose cycle is longer than 12 months (sugarcane,
+      `cycle_months`) tie the land up for longer than one land-year, so yield,
+      water and fertilizer per cycle are scaled by 12/cycle_months. Cost is
+      per quintal, so it scales with the annualized yield automatically.
+
+    profit_ha == yield_qtl_ha * price - cost_ha holds exactly for the
+    returned row, so downstream code (e.g. app price shocks) that recomputes
+    profit from those three fields stays consistent."""
+    cycle_months = _ref_value(ref, crop, "cycle_months", 12.0)
+    deduction = _ref_value(ref, crop, "price_deduction_rs_per_qtl", 0.0)
+    if cycle_months <= 0:
+        raise ValueError(f"{crop}: cycle_months must be > 0, got {cycle_months}")
+    per_year = 12.0 / cycle_months
+
+    yield_qtl_ha = yield_per_cycle_qtl_ha * per_year
+    price = gross_price - deduction
+    cost_ha = cost_rs_per_qtl * yield_qtl_ha
+    return {
+        "crop": crop,
+        "yield_qtl_ha": yield_qtl_ha,
+        "price": price,
+        "price_deduction_rs_per_qtl": deduction,
+        "cycle_months": cycle_months,
+        "cost_ha": cost_ha,
+        "profit_ha": yield_qtl_ha * price - cost_ha,
+        "water_m3_ha": water_m3_per_cycle * per_year,
+        "fert_kg_ha": fert_kg_per_cycle * per_year,
+    }
+
+
+# Sugarcane has no mandi price series (FRP is administered), so its risk
+# cannot come from price variance. It is NOT riskless though: its revenue
+# still varies with yield. 0.097 is the coefficient of variation of
+# Maharashtra sugarcane revenue (yield x FRP, 21 years, detrended) measured
+# by agriopt.optim.risk.build_risk_inputs -- cache["risk"]["cv_table"].
+# Previously profit_std_ha was hard-coded to 0, which made any shift into
+# sugarcane look like de-risking in the app's "Profit risk" metric.
+SUGARCANE_REVENUE_CV = 0.097
+
+
+def profit_std_for(crop: str, row: dict, price_frame: pd.DataFrame | None) -> float:
+    """Per-ha profit standard deviation (Rs/ha/yr) for one economic_row."""
+    if crop == "sugarcane":
+        return row["yield_qtl_ha"] * row["price"] * SUGARCANE_REVENUE_CV
+    if price_frame is None:
+        raise ValueError(f"{crop}: price_frame is required for non-sugarcane price std")
+    sub = price_frame[price_frame["crop"] == crop].sort_values("month").tail(PRICE_STD_LOOKBACK_MONTHS)
+    return row["yield_qtl_ha"] * float(sub["modal_price_rs_per_qtl"].std())
+
+
 def seasons_occupied(crop: str) -> set[str]:
     """Which optimizer season bucket(s) ({"kharif", "rabi"}) a crop's
     hectares count against, for the land constraints."""
@@ -113,36 +193,22 @@ def build_crop_params(
         p = expected_price(crop, horizon=12, msp_floor=(price_mode == "msp_floor"))
         price = p["value_rs_per_qtl"]
 
-        cost_ha = cost_rs_per_ha(crop, yield_qtl_ha, ref)
-        profit_ha = yield_qtl_ha * price - cost_ha
-
         if water_basis == "net_irrigation":
-            water_m3_ha = net_irrigation_mm(crop, rainfall_scenario, ref, region) * MM_TO_M3_PER_HA
+            water_m3_cycle = net_irrigation_mm(crop, rainfall_scenario, ref, region) * MM_TO_M3_PER_HA
         else:
-            water_m3_ha = water_mm(crop, ref) * MM_TO_M3_PER_HA
-        fert_kg_ha = fert_total_kg_ha(crop, ref)
+            water_m3_cycle = water_mm(crop, ref) * MM_TO_M3_PER_HA
 
-        if crop == "sugarcane":
-            # no mandi series -- FRP is a fixed administered price, no
-            # month-to-month price variance to speak of for this metric.
-            profit_std_ha = 0.0
-        else:
-            sub = price_frame[price_frame["crop"] == crop].sort_values("month").tail(PRICE_STD_LOOKBACK_MONTHS)
-            price_std = float(sub["modal_price_rs_per_qtl"].std())
-            profit_std_ha = yield_qtl_ha * price_std
-
-        rows.append(
-            {
-                "crop": crop,
-                "yield_qtl_ha": yield_qtl_ha,
-                "price": price,
-                "cost_ha": cost_ha,
-                "profit_ha": profit_ha,
-                "water_m3_ha": water_m3_ha,
-                "fert_kg_ha": fert_kg_ha,
-                "seasons_occupied": occ,
-                "profit_std_ha": profit_std_ha,
-            }
+        row = economic_row(
+            crop,
+            yield_per_cycle_qtl_ha=yield_qtl_ha,
+            gross_price=price,
+            cost_rs_per_qtl=cost_rs_per_ha(crop, 1.0, ref),
+            water_m3_per_cycle=water_m3_cycle,
+            fert_kg_per_cycle=fert_total_kg_ha(crop, ref),
+            ref=ref,
         )
+        row["seasons_occupied"] = occ
+        row["profit_std_ha"] = profit_std_for(crop, row, price_frame)
+        rows.append(row)
 
     return pd.DataFrame(rows).set_index("crop")

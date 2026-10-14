@@ -33,8 +33,7 @@ from pymoo.optimize import minimize as pymoo_minimize
 from pymoo.util.ref_dirs import get_reference_directions
 from scipy.optimize import linprog, minimize as scipy_minimize
 
-from agriopt.config import FOOD_CROPS
-from agriopt.optim.problem import CropAllocationProblem, Scenario
+from agriopt.optim.problem import CropAllocationProblem, Scenario, food_requirement, food_weights
 from agriopt.optim.problem_risk import CropAllocationProblemRisk
 
 
@@ -45,12 +44,12 @@ def _lp_arrays(params_df: pd.DataFrame, scenario: Scenario):
     fert = params_df["fert_kg_ha"].to_numpy(dtype=float)
     kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in crops], dtype=float)
     rabi_mask = np.array(["rabi" in params_df.loc[c, "seasons_occupied"] for c in crops], dtype=float)
-    food_mask = np.array([c in FOOD_CROPS for c in crops], dtype=float)
+    food_w = food_weights(params_df)
     bounds = [(0.0, scenario.max_share * scenario.land_ha) for _ in crops]
 
-    base_A = np.vstack([kharif_mask, rabi_mask, water, -food_mask])
+    base_A = np.vstack([kharif_mask, rabi_mask, water, -food_w])
     base_b = np.array(
-        [scenario.land_ha, scenario.land_ha, scenario.water_budget_m3, -scenario.food_share_min * scenario.land_ha]
+        [scenario.land_ha, scenario.land_ha, scenario.water_budget_m3, -food_requirement(scenario)]
     )
     return crops, profit, water, fert, base_A, base_b, bounds
 
