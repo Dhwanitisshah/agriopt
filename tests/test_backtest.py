@@ -144,6 +144,10 @@ def test_current_mix_leakfree_matches_land_constraints():
     r = evaluate(x1, params, scenario)
     assert r["kharif_land"] <= scenario.land_ha + 1e-6
     assert r["rabi_land"] <= scenario.land_ha + 1e-6
+    # built per season: the farm's land is fully used (the old all-crops
+    # normalisation left ~24% of kharif and ~38% of rabi land idle)
+    assert r["kharif_land"] == pytest.approx(scenario.land_ha, rel=1e-6)
+    assert r["rabi_land"] == pytest.approx(scenario.land_ha, rel=1e-6)
 
 
 # --- realized data availability sanity check ---------------------------------

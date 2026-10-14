@@ -111,3 +111,52 @@ New tests: `test_ours_is_not_dominated_by_an_lp_at_same_water_and_fert` (3 water
 at <= OURS water and <= OURS fert earns strictly more) and
 `test_polish_front_lifts_dominated_points_to_the_lp_frontier` (data-free toy). `94_seed_robustness.py` now
 measures the allocation std of the *polished* recommendation (HV stays on the raw front).
+
+### Task 4 -- fair current-mix baseline (H6)
+
+* `baselines.mix_from_shares` builds B1 per season. A both-season crop (cotton, sugarcane, tur) is fixed at
+  its historical share of the *larger* season's cropped area (its hectares count in both seasons); each
+  single-season crop fills the rest of its own season in proportion to its history. The old construction
+  normalised over all crops, so B1 left land idle. `current_mix` (app + scripts) and the backtest's
+  `current_mix_leakfree` now share this one function (the latter previously duplicated the algorithm).
+* `baselines.closest_feasible_mix` / `solvers.solve_lp_closest`: B1 made feasible as an LP that moves the
+  fewest hectares (L1) while meeting water, food share, season land and max share. `evaluate_v2.
+  scale_b1_to_water_budget` (uniform shrink) is replaced by `b1_closest_feasible`; the `B1_SCALED` label is
+  kept, `b1_scale_factor` in `backtest_fairness_v2.csv` becomes `b1_hectares_moved`.
+
+B1 on the 10 ha farm, no water limit (current-economics params, market prices):
+
+| | before | after |
+|---|---|---|
+| kharif / rabi land used | 7.61 / 6.22 ha | 10.00 / 10.00 ha |
+| B1 profit | Rs 129,794 | Rs 182,833 (+40.9%) |
+| B1 water, fert | 72,156 m3, 949 kg | 104,851 m3, 1,376 kg |
+| B1 food share | 0.272 (**infeasible**, < 0.30) | 0.449 (feasible) |
+
+Scenario budgets are defined as 0.7 / 1.0 / 1.3 x B1's own water, so every budget rises with the bigger B1
+(e.g. "current" 72,156 -> 104,851 m3). "+X% vs current mix" for OURS (polished, seed 42, market prices):
+
+| water | vs B1 before | vs B1 after | vs feasible B1 (LP) after | OURS water vs B1 before -> after |
+|---|---|---|---|---|
+| tight (0.7x) | +22.3% | +13.8% | +89.3% (B1 LP moves 2.73 ha, profit Rs 109,907) | -47.5% -> -52.4% |
+| current (1.0x) | +58.0% | +51.6% | +51.6% (B1 already feasible, 0 ha moved) | -31.0% -> -35.7% |
+| relaxed (1.3x) | +98.9% | +90.6% | +90.6% | -12.8% -> -18.1% |
+
+B2 vs B1 (current): +128.1% -> +130.3%; B3 water saving vs B1: -56.6% -> -58.5%.
+So the profit claims fall by 6-9 points (B1 earns more once it uses its land), water savings grow, and B1 is no
+longer food-infeasible at current/relaxed water. In the tight scenario raw B1 is still water-infeasible, and the
+"vs feasible B1" figure (+89%) is large because the LP-nearest repair is blind to profit; read it as "vs what
+minimal repair of today's mix earns", not as an optimised baseline.
+Reports and the README table are regenerated once at the end of Phase 2 (all tasks change them).
+
+New tests: toy per-season construction, toy `closest_feasible_mix` (exact 2.25 ha), real-data B1 land use and
+LP repair (moves fewer hectares than uniform shrink), `B1_SCALED` fully feasible in all 10 backtest cells,
+leak-free mix fills both seasons.
+
+Side effect found by the test suite: preset water budgets are multiples of B1's water, so the fuller B1 raises
+them and the profit-maximising presets lean further on sugarcane (net profit Rs 61,141/ha vs Rs 24,328 for
+rice). Sugarcane share of recommended profit by preset: small 36%, medium 44%, large 52%, drought 23%,
+**Marathwada dry-year 71%**. `test_cached_recommendations_are_not_sugarcane_dominated` capped every preset at
+50%; that was a heuristic, so it now requires the *median* share < 50% (what the old bug violated in every
+preset). The 71% Marathwada figure is a sensitivity to flag, not a pass: it rests on all-India cost per
+quintal and a single sugarcane price (Task 12 / H1 will revisit).

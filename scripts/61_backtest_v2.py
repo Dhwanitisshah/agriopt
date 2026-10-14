@@ -51,7 +51,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from agriopt.backtest.evaluate_v2 import ALLOC_TOL_HA, decompose_profit, oracle_water_matched, scale_b1_to_water_budget
+from agriopt.backtest.evaluate_v2 import ALLOC_TOL_HA, decompose_profit, b1_closest_feasible, oracle_water_matched
 from agriopt.config import CROPS, MSP_HISTORY_CSV, REPORTS_RESULTS
 from agriopt.optim.baselines import evaluate
 
@@ -157,7 +157,7 @@ def run_analysis(backtest, water_basis: str = "total_need", rainfall_scenario: s
             xs = dict(meta["x_store"][label])
 
             x1 = xs["B1"]
-            x1_scaled, scale, water_before = scale_b1_to_water_budget(x1, forecast_params, scenario)
+            x1_scaled, moved_ha, water_before = b1_closest_feasible(x1, forecast_params, scenario)
             xs["B1_SCALED"] = x1_scaled
 
             r1 = evaluate(x1, forecast_params, scenario)
@@ -179,7 +179,7 @@ def run_analysis(backtest, water_basis: str = "total_need", rainfall_scenario: s
                     "budget_m3": scenario.water_budget_m3,
                     "b1_water_m3": r1["water_m3"],
                     "b1_feasible": r1["feasible"],
-                    "b1_scale_factor": scale,
+                    "b1_hectares_moved": moved_ha,
                     "b1_scaled_water_m3": r1_scaled["water_m3"],
                     "b1_scaled_feasible": r1_scaled["feasible"],
                     "b1_scaled_food_share": r1_scaled["food_share"],
@@ -357,7 +357,7 @@ def write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_d
     lines = ["# Decision backtest v2: fairness, water-matched oracle, decomposition (Phase 7.1)\n\n"]
 
     lines.append("## 1. B1 feasibility and B1_SCALED fairness\n\n")
-    cols = ["year", "scenario", "budget_m3", "b1_water_m3", "b1_feasible", "b1_scale_factor",
+    cols = ["year", "scenario", "budget_m3", "b1_water_m3", "b1_feasible", "b1_hectares_moved",
             "b1_scaled_water_m3", "b1_scaled_feasible", "b1_scaled_food_share_violated"]
     lines.append("| " + " | ".join(cols) + " |\n" + "|" + "---|" * len(cols) + "\n")
     for _, row in fairness_df.iterrows():
@@ -397,21 +397,22 @@ def write_findings_md(fairness_df, win_summary_df, decomp_df, b2_oracle_df) -> N
 
     lines.append("## Fairness verdict\n\n")
     tight_b1 = fairness_df[fairness_df["scenario"] == "tight"]
-    over_budget_years = tight_b1[~tight_b1["b1_feasible"]]["year"].tolist()
+    infeasible_years = tight_b1[~tight_b1["b1_feasible"]]["year"].tolist()
     lines.append(
-        f"- B1 (current_mix) is water-INFEASIBLE in the tight scenario for years {over_budget_years} "
-        "(uses more water than its own budget allows) -- confirmed via evaluate()'s feasible flag AND a "
-        "direct water_m3 vs budget_m3 comparison. B1_SCALED corrects this by scaling B1's hectares down "
-        "proportionally until water_m3 <= budget.\n"
+        f"- B1 (current_mix) violates a constraint (water budget or minimum food share) in the tight scenario "
+        f"for years {infeasible_years} -- confirmed via evaluate()'s feasible flag. B1_SCALED is the "
+        "allocation closest to B1 (fewest hectares moved, an LP) that satisfies every constraint; "
+        f"it moves {fairness_df['b1_hectares_moved'].mean():.2f} ha on average.\n"
     )
     food_viol = fairness_df[fairness_df["b1_scaled_food_share_violated"]]
     if len(food_viol):
         lines.append(
-            f"- After water-scaling, B1_SCALED's food-share constraint is VIOLATED in "
-            f"{len(food_viol)} year/scenario combos: {list(zip(food_viol['year'], food_viol['scenario']))}.\n"
+            f"- B1_SCALED's food-share constraint is still VIOLATED in "
+            f"{len(food_viol)} year/scenario combos: {list(zip(food_viol['year'], food_viol['scenario']))} "
+            "(it should not be: B1_SCALED is an LP with the food constraint -- investigate).\n"
         )
     else:
-        lines.append("- After water-scaling, B1_SCALED never violates the food-share constraint in any year/scenario.\n")
+        lines.append("- B1_SCALED satisfies the food-share constraint in every year/scenario, by construction.\n")
 
     tight_summary = win_summary_df[win_summary_df["scenario"] == "tight"]
     for strategy in ["OURS", "MODEL_B"]:

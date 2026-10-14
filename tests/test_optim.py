@@ -6,7 +6,15 @@ import pytest
 # test below still runs in CI.
 needs_data = pytest.mark.needs_data
 
-from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, profit_max, same_profit_min_water
+from agriopt.optim.baselines import (
+    closest_feasible_mix,
+    current_mix,
+    evaluate,
+    mix_from_shares,
+    nsga2_recommended,
+    profit_max,
+    same_profit_min_water,
+)
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
 from agriopt.optim.solvers import _lp_arrays, polish_front, solve_lp_profit_max, solve_nsga2
@@ -166,6 +174,70 @@ def test_polish_front_lifts_dominated_points_to_the_lp_frontier():
     assert F[0, 0] > F_raw[0, 0] + 1.0  # but earns more
     best = _lp_profit_at_caps(toy_params, scen, F_raw[0, 1] * (1 + 1e-6), F_raw[0, 2] * (1 + 1e-6))
     assert F[0, 0] == pytest.approx(best, rel=1e-6)
+
+
+def _season_toy():
+    """kharif-only A, rabi-only B, both-season C."""
+    params = pd.DataFrame(
+        {
+            "profit_ha": [100.0, 80.0, 60.0],
+            "water_m3_ha": [10.0, 4.0, 8.0],
+            "fert_kg_ha": [1.0, 1.0, 1.0],
+            "seasons_occupied": [{"kharif"}, {"rabi"}, {"kharif", "rabi"}],
+        },
+        index=["A", "B", "C"],
+    )
+    return params
+
+
+def test_mix_from_shares_fills_each_season_from_its_own_crops():
+    """A(kharif) .3, B(rabi) .2, C(both) .5 -> kharif area .8, rabi .7. The
+    both-season crop is fixed at its share of the LARGER season (.5/.8 of the
+    land); each single-season crop fills the rest of ITS season. The old
+    all-crops normalisation gave x = (3, 2, 5): kharif 8 ha, rabi 7 ha."""
+    params = _season_toy()
+    scen = Scenario(water_budget_m3=1e9, land_ha=10.0, food_share_min=0.0, max_share=1.0)
+    x = mix_from_shares({"A": 0.3, "B": 0.2, "C": 0.5}, params, scen)
+    np.testing.assert_allclose(x, [3.75, 3.75, 6.25])
+    assert x[0] + x[2] == pytest.approx(10.0)  # kharif land fully used
+    assert x[1] + x[2] == pytest.approx(10.0)  # rabi land fully used
+
+
+def test_closest_feasible_mix_moves_the_fewest_hectares():
+    params = _season_toy()
+    x_cur = np.array([3.75, 3.75, 6.25])
+    # current water use = 37.5 + 15 + 50 = 102.5; ask for 80 -> must shed >= 22.5 m3
+    scen = Scenario(water_budget_m3=80.0, land_ha=10.0, food_share_min=0.0, max_share=1.0)
+    x, moved = closest_feasible_mix(x_cur, params, scen)
+    assert x is not None
+    assert float(x @ params["water_m3_ha"].to_numpy()) <= 80.0 + 1e-6
+    assert moved == pytest.approx(float(np.abs(x - x_cur).sum()))
+    # the cheapest way to shed 22.5 m3 is swapping A (10 m3/ha) out of kharif for C... C also
+    # costs water, so the only lever is idling A: 22.5 / 10 = 2.25 ha of A moved.
+    assert moved == pytest.approx(2.25, abs=1e-6)
+    # a feasible current mix is returned untouched
+    easy = Scenario(water_budget_m3=1e9, land_ha=10.0, food_share_min=0.0, max_share=1.0)
+    x_same, moved_same = closest_feasible_mix(x_cur, params, easy)
+    np.testing.assert_allclose(x_same, x_cur, atol=1e-9)
+    assert moved_same == pytest.approx(0.0, abs=1e-9)
+    # an impossible scenario reports it instead of returning something infeasible
+    assert closest_feasible_mix(x_cur, params, Scenario(water_budget_m3=-1.0, land_ha=10.0, food_share_min=0.0, max_share=1.0)) == (None, None)
+
+
+@needs_data
+def test_current_mix_uses_all_land_and_closest_feasible_meets_every_constraint(params):
+    dummy = Scenario(water_budget_m3=1e15, land_ha=10.0)
+    x1 = current_mix(params, dummy)
+    r1 = evaluate(x1, params, dummy)
+    assert r1["kharif_land"] == pytest.approx(10.0, rel=1e-6)
+    assert r1["rabi_land"] == pytest.approx(10.0, rel=1e-6)
+
+    tight = Scenario(water_budget_m3=0.7 * r1["water_m3"], land_ha=10.0)
+    xf, moved = closest_feasible_mix(x1, params, tight)
+    assert xf is not None and evaluate(xf, params, tight)["feasible"]
+    # and it moves fewer hectares than uniformly shrinking B1 to the water budget would
+    uniform = x1 * (tight.water_budget_m3 / r1["water_m3"])
+    assert moved <= float(np.abs(uniform - x1).sum()) + 1e-6
 
 
 def test_toy_2crop_analytical_optimum():

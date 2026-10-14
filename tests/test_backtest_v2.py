@@ -54,9 +54,19 @@ def test_b1_scaled_is_feasible_on_water_every_year_scenario(analysis):
 
 
 def test_b1_scaled_water_never_exceeds_raw_b1_water(analysis):
-    """Scaling only ever shrinks (or keeps) the allocation -- water can't go up."""
+    """B1_SCALED is only ever asked to meet a budget at or below B1's own water
+    (default budget == B1's water, tight == 0.7x), so the LP-nearest feasible
+    mix can't end up using more water than B1."""
     fairness_df = analysis["fairness"]
     assert (fairness_df["b1_scaled_water_m3"] <= fairness_df["b1_water_m3"] + 1e-6).all()
+
+
+def test_b1_scaled_is_fully_feasible_every_year_scenario(analysis):
+    """The old B1_SCALED (uniform shrink) stayed food-share-infeasible in 10/10
+    cells. The LP-nearest mix must satisfy every constraint, food share included."""
+    fairness_df = analysis["fairness"]
+    assert fairness_df["b1_scaled_feasible"].all()
+    assert not fairness_df["b1_scaled_food_share_violated"].any()
 
 
 # --- decomposition identity ---------------------------------------------------

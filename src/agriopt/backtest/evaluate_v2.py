@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from agriopt.optim.baselines import evaluate
+from agriopt.optim.baselines import closest_feasible_mix, evaluate
 from agriopt.optim.problem import Scenario
 from agriopt.optim.solvers import solve_lp_profit_max
 
@@ -21,23 +21,23 @@ FEASIBILITY_TOL = 1e-6
 ALLOC_TOL_HA = 1e-4  # "identical allocation" tolerance for the B2-vs-ORACLE check
 
 
-def scale_b1_to_water_budget(x1: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> tuple[np.ndarray, float, float]:
-    """B1_SCALED: uniformly scale B1's hectares down (same crop MIX, smaller
-    absolute allocation across every crop) until water_m3 <= budget. This is
-    the fair "what if B1 had actually respected the water budget, keeping
-    its own preferred crop ratios" baseline for the tight scenario, where
-    B1 (current_mix_leakfree) is known to go over budget (it is never
-    force-fixed against water -- see baselines.current_mix's docstring).
-    No-op (scale=1.0) if B1 is already within budget (e.g. the default
-    scenario, whose budget IS B1's own water use by construction).
-    Returns (x1_scaled, scale_factor, water_before_scaling)."""
+def b1_closest_feasible(x1: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> tuple[np.ndarray, float, float]:
+    """B1_SCALED: the allocation closest to B1 (fewest hectares moved, L1) that
+    satisfies EVERY scenario constraint -- water budget, food share, season
+    land, max share. It is the fair "what if the current mix had actually
+    respected the constraints" baseline. The previous version scaled every
+    crop down uniformly: that fixed the water budget but could never fix a
+    food-share shortfall (so B1_SCALED stayed infeasible in 10/10 cells) and
+    threw away land instead of swapping crops.
+    Returns (x_feasible, hectares_moved, water_before). hectares_moved is 0 if
+    B1 already satisfies everything; if NO allocation is feasible, B1 is
+    returned unchanged with hectares_moved = nan."""
     x1 = np.asarray(x1, dtype=float)
-    water_v = params_df["water_m3_ha"].to_numpy(dtype=float)
-    water_before = float(x1 @ water_v)
-    if water_before <= scenario.water_budget_m3 + FEASIBILITY_TOL or water_before <= 0:
-        return x1.copy(), 1.0, water_before
-    scale = scenario.water_budget_m3 / water_before
-    return x1 * scale, float(scale), water_before
+    water_before = float(x1 @ params_df["water_m3_ha"].to_numpy(dtype=float))
+    x_new, moved = closest_feasible_mix(x1, params_df, scenario)
+    if x_new is None:
+        return x1.copy(), float("nan"), water_before
+    return x_new, moved, water_before
 
 
 def oracle_water_matched(

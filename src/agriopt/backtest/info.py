@@ -46,6 +46,7 @@ from agriopt.models.yield_model import (
     load_model_frame,
     tune_rf,
 )
+from agriopt.optim.baselines import historical_area_share, mix_from_shares
 from agriopt.optim.params import MM_TO_M3_PER_HA, SUGARCANE_REVENUE_CV, economic_row, seasons_occupied
 from agriopt.optim.risk import HARVEST_WINDOW_MONTHS, detrend_relative_deviation, nearest_psd
 from sklearn.ensemble import RandomForestRegressor
@@ -394,38 +395,15 @@ def commit_planned_costs(realized_params: pd.DataFrame, forecast_params: pd.Data
 
 
 def current_mix_leakfree(params_df: pd.DataFrame, scenario, t: int, n_years: int = 5, state: str = STATE) -> np.ndarray:
-    """Same algorithm as agriopt.optim.baselines.current_mix, but restricted
-    to yield_clean.parquet rows with year <= t-1 BEFORE taking the "last
-    n_years" area-share average -- baselines.current_mix reads the whole
-    file with no cutoff, which would leak years >= t for early decision
-    years (e.g. t=2016 would otherwise see 2016-2019 shares)."""
+    """Same algorithm as agriopt.optim.baselines.current_mix (shared via
+    mix_from_shares), but restricted to yield_clean.parquet rows with
+    year <= t-1 BEFORE taking the "last n_years" area average --
+    baselines.current_mix reads the whole file with no cutoff, which would
+    leak years >= t for early decision years (e.g. t=2016 would otherwise
+    see 2016-2019 shares)."""
     crops = list(params_df.index)
-    df = pd.read_parquet(YIELD_CLEAN_PARQUET)
-    mh = df[(df["state"] == state) & (df["year"] <= t - 1)]
-
-    raw_area = {}
-    for crop in crops:
-        name = CANON_TO_YIELD_NAME[crop]
-        sub = mh[mh["crop"] == name]
-        by_year = sub.groupby("year")["area_ha"].sum()
-        recent = by_year.sort_index(ascending=False).head(n_years)
-        raw_area[crop] = float(recent.mean()) if len(recent) else 0.0
-
-    total_raw = sum(raw_area.values())
-    share = {c: (raw_area[c] / total_raw if total_raw > 0 else 0.0) for c in crops}
-    x_unscaled = np.array([share[c] * scenario.land_ha for c in crops])
-
-    kharif_mask = np.array(["kharif" in params_df.loc[c, "seasons_occupied"] for c in crops])
-    rabi_mask = np.array(["rabi" in params_df.loc[c, "seasons_occupied"] for c in crops])
-    kharif_total = x_unscaled[kharif_mask].sum()
-    rabi_total = x_unscaled[rabi_mask].sum()
-
-    scale = 1.0
-    if kharif_total > scenario.land_ha:
-        scale = min(scale, scenario.land_ha / kharif_total)
-    if rabi_total > scenario.land_ha:
-        scale = min(scale, scenario.land_ha / rabi_total)
-    return x_unscaled * scale
+    share = historical_area_share(crops, n_years=n_years, state=state, max_year=t - 1)
+    return mix_from_shares(share, params_df, scenario)
 
 
 # --- 5) Leak-free risk inputs (Sigma from years <= t-1 only) ----------------

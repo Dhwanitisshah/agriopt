@@ -196,6 +196,36 @@ def exact_front_lp(scenario: Scenario, n: int = 50, params_df: pd.DataFrame | No
     return np.array(X_rows), np.array(F_rows)
 
 
+# --- d1) LP closest to a target allocation (fair B1 baseline) ---------------------
+
+
+def solve_lp_closest(scenario: Scenario, params_df: pd.DataFrame, x_target: np.ndarray):
+    """The allocation satisfying EVERY scenario constraint (season land, water,
+    food share, max share) that is closest to `x_target` in L1 distance
+    (sum of |hectares moved|) -- an LP, with d_i >= |x_i - t_i| as auxiliary
+    variables. Used to turn the (often infeasible) historical current mix into
+    a feasible baseline by moving as few hectares as possible, instead of
+    uniformly shrinking every crop. Returns (x, l1_distance_ha) or
+    (None, None) if no feasible allocation exists."""
+    _, _, _, _, base_A, base_b, bounds = _lp_arrays(params_df, scenario)
+    t = np.asarray(x_target, dtype=float)
+    n = len(t)
+    eye = np.eye(n)
+    A_ub = np.vstack(
+        [
+            np.hstack([base_A, np.zeros((base_A.shape[0], n))]),  # scenario constraints act on x only
+            np.hstack([eye, -eye]),  # x - d <= t
+            np.hstack([-eye, -eye]),  # -x - d <= -t
+        ]
+    )
+    b_ub = np.concatenate([base_b, t, -t])
+    c = np.concatenate([np.zeros(n), np.ones(n)])
+    res = linprog(c, A_ub=A_ub, b_ub=b_ub, bounds=list(bounds) + [(0.0, None)] * n, method="highs")
+    if not res.success:
+        return None, None
+    return np.clip(res.x[:n], 0.0, None), float(res.fun)
+
+
 # --- d2) LP polish of a (heuristic) front --------------------------------------
 
 POLISH_EPS = 1e-7  # relative slack on the water/fert caps, so a feasible NSGA point can't make its own polish LP infeasible
