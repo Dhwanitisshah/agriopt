@@ -284,10 +284,13 @@ def write_findings(strategy_df: pd.DataFrame, quality_df: pd.DataFrame) -> None:
     )
 
     b1_food = strategy_df[strategy_df["strategy"] == "B1"]["food_share"].iloc[0]
+    food_min = Scenario(water_budget_m3=1.0).food_share_min
+    food_verdict = "above" if b1_food >= food_min else "BELOW"
     lines.append(
-        f"- B1 (current mix)'s food_share is {b1_food * 100:.1f}% (comfortably above the 30% minimum) "
-        "in every scenario since it's not water/food-constrained by construction -- if a scenario shows "
-        "B1 infeasible on water, that's flagged, not silently fixed (see optim_strategies.md 'feasible' column).\n"
+        f"- B1 (current mix)'s food_share is {b1_food * 100:.1f}% ({food_verdict} the {food_min * 100:.0f}% minimum) "
+        "in every scenario, since B1 is a fixed historical mix rather than something the solver constrains -- "
+        "if a scenario shows B1 infeasible on water or food share, that's flagged, not silently fixed "
+        "(see optim_strategies.md 'feasible' column).\n"
     )
 
     b1_infeasible = strategy_df[(strategy_df["strategy"] == "B1") & (~strategy_df["feasible"])]

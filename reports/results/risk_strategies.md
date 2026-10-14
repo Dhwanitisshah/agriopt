@@ -7,11 +7,11 @@ Model B pseudo-weights (profit, water, fert, risk) = (0.4, 0.2, 0.1, 0.3).
 
 | strategy | profit | water_m3 | fert_kg | n_crops | portfolio_risk_rs | scenario_n_years | scenario_mean | scenario_worst_year_profit | scenario_worst_year | scenario_P10 | scenario_n_loss_years | feasible |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| B1 | 166258.97 | 74274.19 | 971.33 | 8 | 122519.43 | 18 | 166258.97 | -10888.30 | 2015 | 40739.87 | 1 | True |
-| B2 | 443722.32 | 74274.19 | 1008.35 | 2 | 86304.32 | 19 | 443722.32 | 277647.10 | 2003 | 343321.38 | 0 | True |
-| B3 | 166258.97 | 31586.17 | 566.32 | 2 | 36847.48 | 19 | 166258.97 | 104240.37 | 2003 | 113522.24 | 0 | True |
-| OURS_A | 291925.22 | 52242.14 | 704.83 | 5 | 63909.99 | 18 | 291925.22 | 201782.41 | 2003 | 222478.62 | 0 | True |
-| ModelB | 296564.75 | 52936.01 | 813.14 | 4 | 61218.33 | 18 | 296564.75 | 186739.47 | 2003 | 217110.66 | 0 | True |
+| B1 | 129794.13 | 72155.83 | 949.40 | 8 | 119601.60 | 18 | 129794.13 | -41281.76 | 2015 | 3874.62 | 1 | False |
+| B2 | 296092.58 | 72155.83 | 1443.70 | 3 | 81090.13 | 19 | 296092.58 | 169969.87 | 2002 | 179971.29 | 0 | True |
+| B3 | 129794.13 | 31312.82 | 632.67 | 3 | 56200.09 | 19 | 129794.13 | 28582.37 | 2019 | 68708.15 | 0 | True |
+| OURS_A | 203432.66 | 49779.85 | 953.22 | 4 | 61987.29 | 18 | 203432.66 | 103889.29 | 2019 | 124148.97 | 0 | True |
+| ModelB | 202261.95 | 50161.53 | 1086.80 | 3 | 84267.79 | 18 | 202261.95 | 100004.51 | 2004 | 115978.91 | 0 | True |
 
 ## Sensitivity: sugarcane risk
 
@@ -19,8 +19,8 @@ Model B's recommendation depends on Sigma, which gives sugarcane an unusually lo
 
 | | before (measured std) | after (median-of-others std) |
 |---|---|---|
-| sugarcane hectares | 1.68 | 0.44 |
-| total portfolio risk (Rs) | 61,218 | 87,146 |
-| profit (Rs) | 296,565 | 272,971 |
+| sugarcane hectares | 0.00 | 0.15 |
+| total portfolio risk (Rs) | 84,268 | 95,149 |
+| profit (Rs) | 202,262 | 207,166 |
 
-**Not robust**: sugarcane hectares shift by 73.7% once its std is raised to a typical crop's level -- part of Model B's original preference for sugarcane was an artifact of its constant-FRP price understating its true risk, not a genuine profit/water/fert advantage.
+**Not robust**: sugarcane hectares shift by 4557.4% once its std is raised to a typical crop's level -- part of Model B's original preference for sugarcane was an artifact of its constant-FRP price understating its true risk, not a genuine profit/water/fert advantage.

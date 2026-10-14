@@ -125,13 +125,17 @@ def test_b2_realized_profit_never_exceeds_oracle(analysis):
     assert violations.empty, f"B2 beat ORACLE:\n{violations[['year', 'scenario', 'b2_realized_profit', 'oracle_realized_profit']]}"
 
 
-def test_b2_and_oracle_allocations_are_identical_within_tolerance(analysis):
-    """Documents (and pins) the B2==ORACLE finding: both are profit-max LPs
-    over an identical feasible region, so whenever forecast/realized
-    profit_ha rank crops the same way, they land on the same vertex."""
+def test_b2_and_oracle_allocations_differ_in_most_cells(analysis):
+    """B2 (plans on forecast profit_ha) and ORACLE (plans on realized profit_ha)
+    are profit-max LPs over the same feasible region. Before the cost-unit fix
+    the backtest 'profit' was ~revenue, so forecast and realized profit ranked
+    crops identically and B2 == ORACLE in all 8 cells -- an artefact, not a
+    finding. With real margins the two disagree in most cells, so the backtest
+    can actually measure forecast skill."""
     b2_oracle_df = analysis["b2_oracle"]
     assert len(b2_oracle_df) > 0
-    assert (b2_oracle_df["max_abs_diff_ha"] < 1e-3).all()
+    differing = (b2_oracle_df["max_abs_diff_ha"] > 1e-3).mean()
+    assert differing > 0.5, f"B2 == ORACLE again in {1 - differing:.0%} of cells -- cost units regressed?"
 
 
 # --- MSP provenance ------------------------------------------------------------

@@ -2,7 +2,7 @@
 
 Crop_Year convention is an ASSUMPTION (kharif: Oct-Dec of year t; rabi: Mar-May of year t+1) -- see `agriopt.optim.risk` module docstring; unverified against an independent source, flagged, not silently trusted.
 
-Sigma (revenue covariance, Rs^2) minimum eigenvalue before PSD clipping: 5,869,552.56 (already PSD, no clipping applied).
+Sigma (revenue covariance, Rs^2) minimum eigenvalue before PSD clipping: 5,859,240.18 (already PSD, no clipping applied).
 
 ## Per-crop revenue variability (Maharashtra, detrended)
 

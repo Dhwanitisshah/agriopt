@@ -8,18 +8,18 @@ Maharashtra's yield_clean.parquet has no rows at all for year 2020 (any crop) --
 
 | scenario | strategy | n_years_realized | total_realized_profit | mean_realized_profit | worst_year_realized_profit | capture_ratio_vs_oracle | win_count_vs_b1 | mean_water_saved_vs_b1_m3 | mean_signed_forecast_gap_rs |
 |---|---|---|---|---|---|---|---|---|---|
-| default | B1 | 4 | 1,679,251 | 419,813 | 352,051 | 0.614 | - | 0.000 | 26,617 |
-| default | B2 | 4 | 2,734,239 | 683,560 | 619,069 | 1.000 | 4.000 | 0.000 | 42,502 |
-| default | B3 | 4 | 1,744,192 | 436,048 | 368,647 | 0.638 | 4.000 | 28,491 | 42,852 |
-| default | OURS | 4 | 1,944,240 | 486,060 | 425,264 | 0.711 | 4.000 | 20,730 | 29,266 |
-| default | MODEL_B | 4 | 1,857,304 | 464,326 | 405,830 | 0.679 | 3.000 | 20,604 | 32,871 |
-| default | ORACLE | 4 | 2,734,239 | 683,560 | 619,069 | 1.000 | 4.000 | - | 0.000 |
-| tight | B1 | 4 | 1,679,251 | 419,813 | 352,051 | 0.860 | - | 0.000 | 26,617 |
-| tight | B2 | 4 | 1,952,282 | 488,070 | 430,893 | 1.000 | 4.000 | 22,323 | 42,455 |
-| tight | B3 | 4 | 1,744,192 | 436,048 | 368,647 | 0.893 | 4.000 | 28,491 | 42,852 |
-| tight | OURS | 4 | 1,418,556 | 354,639 | 290,033 | 0.727 | 0.000 | 36,188 | 32,296 |
-| tight | MODEL_B | 4 | 1,284,269 | 321,067 | 285,333 | 0.658 | 0.000 | 35,359 | 14,160 |
-| tight | ORACLE | 4 | 1,952,282 | 488,070 | 430,893 | 1.000 | 4.000 | - | 0.000 |
+| default | B1 | 4 | 648,901 | 162,225 | 94,332 | 0.554 | - | 0.000 | 26,572 |
+| default | B2 | 4 | 1,025,134 | 256,284 | 192,911 | 0.875 | 4.000 | 0.000 | 27,391 |
+| default | B3 | 4 | 673,257 | 168,314 | 93,289 | 0.575 | 2.000 | 33,423 | 32,661 |
+| default | OURS | 4 | 803,877 | 200,969 | 151,565 | 0.686 | 3.000 | 21,780 | 32,720 |
+| default | MODEL_B | 4 | 721,101 | 180,275 | 129,957 | 0.616 | 3.000 | 19,844 | 19,574 |
+| default | ORACLE | 4 | 1,171,298 | 292,824 | 213,937 | 1.000 | 4.000 | - | 0.000 |
+| tight | B1 | 4 | 648,901 | 162,225 | 94,332 | 0.707 | - | 0.000 | 26,572 |
+| tight | B2 | 4 | 820,860 | 205,215 | 154,668 | 0.894 | 3.000 | 21,666 | 33,667 |
+| tight | B3 | 4 | 673,257 | 168,314 | 93,289 | 0.733 | 2.000 | 33,423 | 32,661 |
+| tight | OURS | 4 | 647,307 | 161,827 | 105,362 | 0.705 | 3.000 | 35,641 | 32,412 |
+| tight | MODEL_B | 4 | 560,833 | 140,208 | 103,457 | 0.611 | 2.000 | 34,226 | 20,725 |
+| tight | ORACLE | 4 | 918,304 | 229,576 | 165,687 | 1.000 | 4.000 | - | 0.000 |
 
 `mean_signed_forecast_gap_rs` = mean(realized - planned) profit -- positive means plans came in MORE profitable than forecast (underpromised), negative means they were overoptimistic. Signed, not absolute, because 'how optimistic was the plan' is the question being asked (absolute error would only say how big the miss was, not which direction).
 
@@ -29,7 +29,7 @@ Maharashtra's yield_clean.parquet has no rows at all for year 2020 (any crop) --
 
 | scenario | challenger | n_years | n_wins_vs_b1 | sign_test_p | wilcoxon_stat | wilcoxon_p | mean_diff_rs |
 |---|---|---|---|---|---|---|---|
-| default | OURS | 4 | 4 | 0.1250 | 0.0000 | 0.1250 | 66247.2750 |
-| default | MODEL_B | 4 | 3 | 0.6250 | 1.0000 | 0.2500 | 44513.1346 |
-| tight | OURS | 4 | 0 | 0.1250 | 0.0000 | 0.1250 | -65173.7794 |
-| tight | MODEL_B | 4 | 0 | 0.1250 | 0.0000 | 0.1250 | -98745.5130 |
+| default | OURS | 4 | 3 | 0.6250 | 1.0000 | 0.2500 | 38743.9994 |
+| default | MODEL_B | 4 | 3 | 0.6250 | 2.0000 | 0.3750 | 18049.7849 |
+| tight | OURS | 4 | 3 | 0.6250 | 4.0000 | 0.8750 | -398.6006 |
+| tight | MODEL_B | 4 | 2 | 1.0000 | 3.0000 | 0.6250 | -22017.1123 |

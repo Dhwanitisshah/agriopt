@@ -6,29 +6,29 @@ Reruns Phase 7.1's fairness metrics (B1_SCALED, profit per 1,000 m3 of water, ca
 
 | scenario | strategy | n_years | win_count_vs_b1 | win_count_vs_b1_scaled | mean_capture_ratio_w | mean_profit_per_1000m3 |
 |---|---|---|---|---|---|---|
-| default | B1 | 4 | - | - | 0.576 | 15464.283 |
-| default | B1_SCALED | 4 | - | - | 0.576 | 15464.283 |
-| default | B2 | 4 | 4.000 | 4.000 | 0.954 | 25512.065 |
-| default | B3 | 4 | 3.000 | 3.000 | 0.954 | 205430.347 |
-| default | MODEL_B | 4 | 4.000 | 4.000 | 0.819 | 31496.269 |
-| default | ORACLE | 4 | - | - | 1.000 | 26806.778 |
-| default | OURS | 4 | 4.000 | 4.000 | 0.920 | 35329.910 |
-| tight | B1 | 4 | - | - | 0.576 | 15464.283 |
-| tight | B1_SCALED | 4 | - | - | 0.461 | 15464.283 |
-| tight | B2 | 4 | 4.000 | 4.000 | 0.948 | 31668.315 |
-| tight | B3 | 4 | 3.000 | 4.000 | 0.954 | 205430.347 |
-| tight | MODEL_B | 4 | 2.000 | 4.000 | 0.796 | 40899.716 |
-| tight | ORACLE | 4 | - | - | 1.000 | 33550.016 |
-| tight | OURS | 4 | 3.000 | 4.000 | 0.872 | 47444.753 |
+| default | B1 | 4 | - | - | 0.531 | 5604.532 |
+| default | B1_SCALED | 4 | - | - | 0.531 | 5604.532 |
+| default | B2 | 4 | 3.000 | 3.000 | 0.820 | 8438.275 |
+| default | B3 | 4 | 2.000 | 2.000 | 0.818 | 20486.149 |
+| default | MODEL_B | 4 | 2.000 | 2.000 | 0.647 | 9858.612 |
+| default | ORACLE | 4 | - | - | 1.000 | 13707.942 |
+| default | OURS | 4 | 3.000 | 3.000 | 0.778 | 14296.810 |
+| tight | B1 | 4 | - | - | 0.531 | 5604.532 |
+| tight | B1_SCALED | 4 | - | - | 0.402 | 5604.532 |
+| tight | B2 | 4 | 3.000 | 3.000 | 0.796 | 10945.128 |
+| tight | B3 | 4 | 2.000 | 3.000 | 0.818 | 20486.149 |
+| tight | MODEL_B | 4 | 2.000 | 3.000 | 0.642 | 12325.882 |
+| tight | ORACLE | 4 | - | - | 1.000 | 15540.636 |
+| tight | OURS | 4 | 2.000 | 4.000 | 0.718 | 17720.662 |
 
 ## Budget-level capture ratio (total realized profit / ORACLE's total realized profit)
 
 | strategy | default | tight |
 |---|---|---|
-| B1 | 0.577 | 0.658 |
-| B1_SCALED | 0.577 | 0.461 |
-| B2 | 0.951 | 0.943 |
-| B3 | 0.573 | 0.654 |
-| MODEL_B | 0.671 | 0.676 |
+| B1 | 0.540 | 0.573 |
+| B1_SCALED | 0.540 | 0.401 |
+| B2 | 0.815 | 0.786 |
+| B3 | 0.487 | 0.516 |
+| MODEL_B | 0.527 | 0.505 |
 | ORACLE | 1.000 | 1.000 |
-| OURS | 0.761 | 0.739 |
+| OURS | 0.683 | 0.638 |
