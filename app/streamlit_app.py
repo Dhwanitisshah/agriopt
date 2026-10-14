@@ -58,12 +58,6 @@ def _params_df(region: str, water_basis: str, rainfall_scenario: str, price_mode
     return appdata.params_df_for(raw, region, water_basis, rainfall_scenario, price_mode)
 
 
-@st.cache_resource(show_spinner=False)
-def _risk_inputs(sugarcane_mode: str):
-    raw = _load_cache_raw()
-    return appdata.risk_inputs_from_cache(raw, sugarcane_mode=sugarcane_mode)
-
-
 st.title("AgriOpt — Multi-objective crop planning (Maharashtra)")
 
 if not appdata.cache_exists():
@@ -95,8 +89,10 @@ weights = sidebar_inputs.weights
 params_df = _params_df(scenario.region, scenario.water_basis, scenario.rainfall_scenario, scenario.price_mode)
 params_df = apply_price_shocks(params_df, sidebar_inputs.price_multipliers, sidebar_inputs.sugarcane_frp_override)
 
-risk_inputs = _risk_inputs(sidebar_inputs.sugarcane_risk_mode)
-R = appdata.revenue_vector_from_cache(cache_raw)
+# Risk follows the scenario the user is looking at: Sigma is re-scaled with R = yield x price of the
+# ACTIVE params_df (price mode and what-if price shocks included), not the cache's market-price R.
+risk_inputs = appdata.risk_inputs_for_params(cache_raw, params_df, sidebar_inputs.sugarcane_risk_mode)
+R = appdata.revenue_vector(params_df, risk_inputs.crops)
 
 if "scenario_result" not in st.session_state:
     st.session_state["scenario_result"] = None

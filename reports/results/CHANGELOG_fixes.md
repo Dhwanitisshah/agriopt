@@ -216,3 +216,29 @@ irrigated 0.77 vs 0.60 per rupee, medium 0.83 vs 0.80 (the normal plan leaves ra
 New tests: `tests/test_risk_measure.py` (toy: absolute risk halves when land is halved, per-profit risk does
 not; empty/losing plans get the cap; `evaluate` with Sigma counts correlation) and a real-data test that a
 risk-heavy Model B crops >= 90% of Model A's area with no higher risk per rupee.
+
+### Task 6 -- risk inputs follow the user's scenario (M4)
+
+`risk.sigma_from_deviations(deviation_matrix, R, crops, std_overrides)` is now the single place
+Sigma = dev_cov * outer(R, R) is built (`build_risk_inputs` and `sigma_with_overridden_std` call it; the cached
+Sigma is unchanged to the last digit). The app computes it at request time with `app.data.risk_inputs_for_params`,
+taking R = yield x price from the *active* params_df (price mode, per-crop price multipliers and the sugarcane FRP
+override included) and the cached historical deviation matrix; `revenue_vector(params_df, crops)` feeds the Risk
+tab. The cache build derives each preset's Sigma the same way. Previously the Risk tab and risk-aware solver paired
+scenario profits with the *market-price* R from the cache.
+
+Default inputs reproduce the cached Sigma exactly, so the five cached presets are unchanged (verified: every
+preset B1/OURS profit and risk identical before/after). Effect on live what-if scenarios (10 ha, current water,
+risk-aware, conservative Sigma):
+
+| scenario | B1 risk, stale -> live Sigma | risk-aware plan: risk the old app showed -> true (live) risk | plan chosen with live Sigma: risk / profit |
+|---|---|---|---|
+| soybean price -30% | 179,540 -> 170,514 | 184,821 -> 184,818 | 211,541 / 238,801 |
+| rice price +30% | 179,540 -> 180,970 | 185,465 -> 194,594 | 191,675 / 317,948 |
+| MSP-floor price mode | 179,540 -> 219,738 (+22%) | 158,738 -> 201,916 (+27%) | 211,384 / 314,932 (old plan: 299,122) |
+
+So in MSP-floor mode the old app understated the risk of both B1 and its recommendation by 22-27%, and a
+price shock moved profit but not risk. New tests (`tests/test_risk_follows_scenario.py`): default inputs
+reproduce the cache for both sugarcane modes; a rice +20% shock multiplies rice variance by 1.44 and its
+covariances by 1.2 and leaves the other crops untouched; the FRP override rescales sugarcane risk; MSP mode gets
+its own PSD Sigma; cached preset profit risk equals the request-time value.

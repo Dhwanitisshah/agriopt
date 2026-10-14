@@ -155,6 +155,42 @@ def nearest_psd(sigma: np.ndarray, min_eig: float = MIN_EIGENVALUE_FLOOR) -> tup
     return psd, min_eig_observed
 
 
+def sigma_from_deviations(
+    deviation_matrix: pd.DataFrame,
+    R: np.ndarray,
+    crops: list[str] | None = None,
+    std_overrides: dict[str, float] | None = None,
+) -> tuple[np.ndarray, float]:
+    """Revenue covariance in Rs^2: Sigma_ij = cov(dev_i, dev_j) * R_i * R_j,
+    where dev is the (unitless) detrended relative revenue deviation and R_i the
+    expected revenue/ha of crop i. Because the deviation covariance is
+    history and R_i is whatever the CURRENT scenario says (yield x price after
+    any what-if price shock), the same history can be re-scaled to any
+    scenario without touching raw data -- this is how the app keeps risk and
+    profit on the same prices.
+
+    `std_overrides` ({crop: relative std}) replaces specific crops' deviation
+    std while keeping the correlation structure (see sigma_with_overridden_std).
+    Returns (Sigma_psd, min_eigenvalue_before_clipping)."""
+    crops = list(crops if crops is not None else deviation_matrix.columns)
+    dev_cov = deviation_matrix.cov().reindex(index=crops, columns=crops).to_numpy(dtype=float)
+    dev_cov = np.nan_to_num(dev_cov, nan=0.0)
+
+    if std_overrides:
+        std = np.sqrt(np.clip(np.diag(dev_cov), 0.0, None))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            corr = dev_cov / np.outer(std, std)
+        corr = np.nan_to_num(corr, nan=0.0)
+        np.fill_diagonal(corr, 1.0)
+        new_std = std.copy()
+        for crop, val in std_overrides.items():
+            new_std[crops.index(crop)] = val
+        dev_cov = corr * np.outer(new_std, new_std)
+
+    R = np.asarray(R, dtype=float)
+    return nearest_psd(dev_cov * np.outer(R, R))
+
+
 @dataclass
 class RiskInputs:
     crops: list[str]
@@ -190,10 +226,7 @@ def build_risk_inputs(params_df: pd.DataFrame, crops: list[str] = CROPS, state: 
     deviation_matrix = pd.DataFrame(deviation_cols).reindex(columns=crops)
 
     R = (params_df.loc[crops, "yield_qtl_ha"] * params_df.loc[crops, "price"]).to_numpy(dtype=float)
-    dev_cov = deviation_matrix.cov().reindex(index=crops, columns=crops).to_numpy(dtype=float)
-    dev_cov = np.nan_to_num(dev_cov, nan=0.0)
-    Sigma_raw = dev_cov * np.outer(R, R)
-    Sigma, min_eig_raw = nearest_psd(Sigma_raw)
+    Sigma, min_eig_raw = sigma_from_deviations(deviation_matrix, R, crops)
 
     cv_table = pd.DataFrame(cv_rows).set_index("crop").reindex(crops)
 
@@ -375,20 +408,4 @@ def sigma_with_overridden_std(risk_inputs: RiskInputs, R: np.ndarray, overrides:
     not genuinely lower agronomic risk -- see risk_matrix.md) actually
     drives the risk-aware recommendation, by substituting a more typical
     std for it. Returns (Sigma_psd, min_eigenvalue_before_clipping)."""
-    crops = risk_inputs.crops
-    dev_cov = risk_inputs.deviation_matrix.cov().reindex(index=crops, columns=crops).to_numpy(dtype=float)
-    dev_cov = np.nan_to_num(dev_cov, nan=0.0)
-    std = np.sqrt(np.clip(np.diag(dev_cov), 0.0, None))
-
-    with np.errstate(invalid="ignore", divide="ignore"):
-        corr = dev_cov / np.outer(std, std)
-    corr = np.nan_to_num(corr, nan=0.0)
-    np.fill_diagonal(corr, 1.0)
-
-    new_std = std.copy()
-    for crop, val in overrides.items():
-        new_std[crops.index(crop)] = val
-
-    new_dev_cov = corr * np.outer(new_std, new_std)
-    Sigma_raw = new_dev_cov * np.outer(R, R)
-    return nearest_psd(Sigma_raw)
+    return sigma_from_deviations(risk_inputs.deviation_matrix, R, risk_inputs.crops, overrides)

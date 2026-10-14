@@ -99,6 +99,7 @@ from agriopt.models.yield_model import load_metadata
 from agriopt.optim.baselines import historical_area_share
 from agriopt.optim.params import MM_TO_M3_PER_HA, build_crop_params
 from agriopt.optim.risk import build_risk_inputs, sigma_with_overridden_std
+import app.data as appdata
 from app.pipeline import current_mix_water, run_pipeline, weights4_from_priority_and_risk_aversion, weights_from_priority
 from app.presets import DEFAULT_FOOD_SHARE_MIN, DEFAULT_MAX_SHARE, DEFAULT_PRICE_MODE, DEFAULT_PRIORITY, DEFAULT_RISK_AVERSION, PRESETS
 from agriopt.optim.problem import Scenario
@@ -283,7 +284,7 @@ def _params_df_for_preset(params_block: dict, preset: dict, mode: str) -> pd.Dat
     return df
 
 
-def _build_preset_results(params_block: dict, Sigma_conservative: np.ndarray, current_mix_share: dict[str, float]) -> dict:
+def _build_preset_results(params_block: dict, risk_block: dict, current_mix_share: dict[str, float]) -> dict:
     """DEFAULT_LAND_HA import kept local to avoid an unused-import lint hit
     when this function is the only caller."""
     from app.presets import DEFAULT_LAND_HA
@@ -306,6 +307,10 @@ def _build_preset_results(params_block: dict, Sigma_conservative: np.ndarray, cu
             rainfall_scenario=preset.get("rainfall_scenario", "normal"),
             region=preset.get("region", "maharashtra"),
         )
+        # Sigma re-scaled to THIS preset's expected revenue (the same call the app makes at request time)
+        Sigma_conservative = appdata.risk_inputs_for_params(
+            {"risk": risk_block}, params_df, sugarcane_mode="conservative"
+        ).Sigma
         print(f"  preset={name!r}: land={land_ha} water_budget={water_budget:.1f} region={scenario.region} basis={scenario.water_basis}")
 
         result_normal = run_pipeline(
@@ -384,8 +389,7 @@ def main() -> None:
     cache["current_mix_shares"] = historical_area_share(CROPS)
 
     print(f"\n-- precomputing preset results (NSGA-II + NSGA-III, {len(PRESETS)} presets) --")
-    Sigma_conservative = np.array(cache["risk"]["Sigma"]["conservative"], dtype=float)
-    cache["preset_results"] = _build_preset_results(cache["params"], Sigma_conservative, cache["current_mix_shares"])
+    cache["preset_results"] = _build_preset_results(cache["params"], cache["risk"], cache["current_mix_shares"])
 
     CACHE_PATH.write_text(json.dumps(cache, indent=2, default=str), encoding="utf-8")
     size_mb = CACHE_PATH.stat().st_size / 1e6

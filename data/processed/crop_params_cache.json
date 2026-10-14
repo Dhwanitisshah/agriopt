@@ -1,5 +1,5 @@
 {
-  "built_at": "2026-10-14T23:40:42.241140+00:00",
+  "built_at": "2026-10-14T23:44:31.857740+00:00",
   "crops": [
     "rice",
     "wheat",
@@ -6767,7 +6767,7 @@
             25.885970578317195
           ]
         ],
-        "nsga_runtime": 0.6778849999991508,
+        "nsga_runtime": 1.2483935999989626,
         "risk_aware_failed": false
       },
       "risk_aware": {
@@ -8064,7 +8064,7 @@
             25.885970578317195
           ]
         ],
-        "nsga_runtime": 2.045091300000422,
+        "nsga_runtime": 3.9482336999972176,
         "risk_aware_failed": false
       }
     },
@@ -9350,7 +9350,7 @@
             177.75786679800206
           ]
         ],
-        "nsga_runtime": 0.5484744000004866,
+        "nsga_runtime": 1.1523115999989386,
         "risk_aware_failed": false
       },
       "risk_aware": {
@@ -10632,7 +10632,7 @@
             177.75786679800206
           ]
         ],
-        "nsga_runtime": 1.974540799999886,
+        "nsga_runtime": 3.9883089999966614,
         "risk_aware_failed": false
       }
     },
@@ -11918,7 +11918,7 @@
             685.3795624544442
           ]
         ],
-        "nsga_runtime": 0.5822121000001061,
+        "nsga_runtime": 1.1937035000009928,
         "risk_aware_failed": false
       },
       "risk_aware": {
@@ -13200,7 +13200,7 @@
             685.3795624544442
           ]
         ],
-        "nsga_runtime": 1.957652799999778,
+        "nsga_runtime": 4.265374299997347,
         "risk_aware_failed": false
       }
     },
@@ -14501,7 +14501,7 @@
             697.4775805354287
           ]
         ],
-        "nsga_runtime": 0.5080423999988852,
+        "nsga_runtime": 1.0626640000009502,
         "risk_aware_failed": false
       },
       "risk_aware": {
@@ -15798,7 +15798,7 @@
             697.4775805354287
           ]
         ],
-        "nsga_runtime": 1.8717133000009198,
+        "nsga_runtime": 4.085930599998392,
         "risk_aware_failed": false
       }
     },
@@ -17099,7 +17099,7 @@
             343.1445612808746
           ]
         ],
-        "nsga_runtime": 0.5608824999999342,
+        "nsga_runtime": 1.1791147000003548,
         "risk_aware_failed": false
       },
       "risk_aware": {
@@ -18396,7 +18396,7 @@
             343.1445612808746
           ]
         ],
-        "nsga_runtime": 1.9459148999976605,
+        "nsga_runtime": 4.358635900000081,
         "risk_aware_failed": false
       }
     }

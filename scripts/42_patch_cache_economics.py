@@ -121,8 +121,7 @@ def main() -> None:
 
     print("-- re-solving presets with the patched economics --")
     bc = _load_build_cache_module()
-    Sigma_conservative = np.array(cache["risk"]["Sigma"]["conservative"], dtype=float)
-    cache["preset_results"] = bc._build_preset_results(cache["params"], Sigma_conservative, cache["current_mix_shares"])
+    cache["preset_results"] = bc._build_preset_results(cache["params"], cache["risk"], cache["current_mix_shares"])
     cache["economics_patched_at"] = datetime.now(timezone.utc).isoformat()
 
     CACHE_PATH.write_text(json.dumps(cache, indent=2, default=str), encoding="utf-8")

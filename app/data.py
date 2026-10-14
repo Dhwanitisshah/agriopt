@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from agriopt.config import DATA_PROCESSED
-from agriopt.optim.risk import RiskInputs
+from agriopt.optim.risk import RiskInputs, sigma_from_deviations
 
 CACHE_PATH = DATA_PROCESSED / "crop_params_cache.json"
 BUILD_CACHE_CMD = "python scripts\\40_build_cache.py"
@@ -82,6 +82,38 @@ def risk_inputs_from_cache(raw: dict, sugarcane_mode: str = "conservative") -> R
         min_eigenvalue_raw=r["min_eigenvalue_raw"],
         trend_info={},
         cv_table=cv_table,
+    )
+
+
+def revenue_vector(params_df: pd.DataFrame, crops: list[str]) -> np.ndarray:
+    """R_i = expected revenue/ha (yield_qtl_ha * price) of the ACTIVE params_df,
+    i.e. after the user's price mode and what-if price shocks, in `crops` order."""
+    p = params_df.loc[crops]
+    return (p["yield_qtl_ha"] * p["price"]).to_numpy(dtype=float)
+
+
+def risk_inputs_for_params(raw: dict, params_df: pd.DataFrame, sugarcane_mode: str = "conservative") -> RiskInputs:
+    """Like risk_inputs_from_cache, but Sigma is re-scaled to the scenario the
+    user is actually looking at: Sigma = dev_cov * outer(R, R) with R taken from
+    `params_df` (price mode, price multipliers and the FRP override included)
+    instead of the cache's market-price R. The historical deviation matrix is
+    the cached one -- only the rupee scale follows the scenario. Without this
+    the Risk tab and the risk-aware solver paired scenario profits with
+    market-price risk (e.g. a +20% rice price raised profit but not risk).
+    With default inputs this reproduces the cached Sigma exactly."""
+    base = risk_inputs_from_cache(raw, sugarcane_mode=sugarcane_mode)
+    overrides = {"sugarcane": raw["risk"]["median_other_std"]} if sugarcane_mode == "conservative" else None
+    Sigma, min_eig = sigma_from_deviations(
+        base.deviation_matrix, revenue_vector(params_df, base.crops), base.crops, overrides
+    )
+    return RiskInputs(
+        crops=base.crops,
+        deviation_matrix=base.deviation_matrix,
+        revenue_matrix=base.revenue_matrix,
+        Sigma=Sigma,
+        min_eigenvalue_raw=min_eig,
+        trend_info=base.trend_info,
+        cv_table=base.cv_table,
     )
 
 
