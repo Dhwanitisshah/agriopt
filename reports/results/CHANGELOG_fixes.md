@@ -160,3 +160,59 @@ rice). Sugarcane share of recommended profit by preset: small 36%, medium 44%, l
 50%; that was a heuristic, so it now requires the *median* share < 50% (what the old bug violated in every
 preset). The 71% Marathwada figure is a sensitivity to flag, not a pass: it rests on all-India cost per
 quintal and a single sugarcane price (Task 12 / H1 will revisit).
+
+### Task 5 -- risk mode must not reward fallow land (H5)
+
+**Objective.** The risk-aware NSGA-III's 4th objective was the absolute `sqrt(x' Sigma x)` in rupees, which
+an empty field drives to zero. It is now risk per rupee of expected profit, `sqrt(x' Sigma x) / profit(x)`
+(`risk.risk_per_profit_vectorized`, `CropAllocationProblemRisk(risk_measure="cv")`, default; `"absolute"`
+reproduces the old behaviour). Scaling every crop's hectares by c leaves it unchanged, so planting less buys
+no safety; a plan with no positive profit scores the cap (5.0), never "safe". I chose this over a hard
+minimum-cropped-area constraint because a land floor would make water-limited scenarios infeasible.
+
+Evidence (10 ha, current water, market prices, frp_based Sigma, seed 42, weights risk 0.8 / profit 0.1 /
+water 0.05 / fert 0.05):
+
+| risk objective | profit | absolute risk | risk per Rs profit | kharif / rabi ha cropped |
+|---|---|---|---|---|
+| absolute (old) | Rs 149,161 | Rs 50,730 | 0.340 | 3.25 / 5.05 |
+| per profit (new) | Rs 324,420 | Rs 82,536 | 0.254 | 6.25 / 6.36 |
+
+The old objective bought a lower rupee risk by idling ~6.7 ha of 20 ha-seasons *and* halving profit, and was
+worse on risk per rupee. At the default weights it also failed to converge in the tight scenario (Model B
+dominated by Model A on all four axes: profit 190,794 vs 208,088, risk 138,239 vs 63,468), which is the
+mechanism behind the Phase 1 "Model B is worse than Model A" flip. With the new objective, Model B vs Model A
+(NSGA-II, polished):
+
+| water | A profit / risk Rs / risk per Rs | B profit / risk Rs / risk per Rs |
+|---|---|---|
+| tight | 208,088 / 63,468 / 0.305 | 228,243 / 62,301 / 0.273 |
+| current | 277,183 / 77,157 / 0.278 | 324,420 / 82,536 / 0.254 |
+| relaxed | 348,510 / 90,592 / 0.260 | 409,384 / 101,912 / 0.249 |
+
+Model B now beats Model A on profit and risk per rupee in all three; it takes on more rupee risk at
+current/relaxed water because it also plants more sugarcane (frp_based Sigma gives it a low CV; the app's
+default `conservative` Sigma does not).
+
+**Reported profit risk.** `baselines.evaluate(..., Sigma=)` now computes `profit_risk = sqrt(x' Sigma x)`;
+the app pipeline, the preset cache and scripts 30/31 pass Sigma (the app always, not only in risk-aware mode).
+Without Sigma it falls back to the independent-crops figure. The independent figure understated risk about
+5x because it ignored positive co-movement (cache presets, `conservative` Sigma):
+
+| preset | B1 risk before -> after | OURS vs B1 (normal mode) before -> after | OURS vs B1 (risk-aware) before -> after |
+|---|---|---|---|
+| small rainfed | 7,007 -> 35,908 | +105.7% -> +16.5% | -32.6% -> +10.1% |
+| medium mixed | 17,516 -> 89,770 | +88.7% -> +13.4% | -23.3% -> +6.5% |
+| large irrigated | 52,549 -> 269,310 | +58.3% -> +1.2% | -41.4% -> +20.4% |
+| drought year | 35,033 -> 179,540 | +102.2% -> +12.8% | -16.8% -> +10.7% |
+| Marathwada dry | 17,516 -> 89,770 | +140.5% -> +39.5% | -3.5% -> +19.3% |
+
+Two claims weaken: (1) the headline "profit risk +100% vs current mix" in normal mode was an artefact and is
++1% to +40%; (2) the risk-aware plan no longer shows a rupee-risk *reduction* vs the current mix in any preset
+(+6% to +20%). Per rupee of profit it is still lower than B1 (0.98) in 4 of 5 presets (0.77-0.97); the drought
+preset is slightly higher (1.04). Risk-aware is not uniformly less risky than the normal plan either: large
+irrigated 0.77 vs 0.60 per rupee, medium 0.83 vs 0.80 (the normal plan leaves rabi land idle to save water).
+
+New tests: `tests/test_risk_measure.py` (toy: absolute risk halves when land is halved, per-profit risk does
+not; empty/losing plans get the cap; `evaluate` with Sigma counts correlation) and a real-data test that a
+risk-heavy Model B crops >= 90% of Model A's area with no higher risk per rupee.

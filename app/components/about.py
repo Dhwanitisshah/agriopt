@@ -32,7 +32,7 @@ def render_about_tab() -> None:
         "rice is assumed milled-rice-equivalent (converted to paddy) and cotton is assumed lint bales "
         "(converted to kapas) -- see docs/units.md.\n"
         "- **Sugarcane has no market price series**; it uses the government FRP instead of a forecast.\n"
-        "- **profit_risk is a reported metric, not an optimization objective**, and assumes each crop's price "
-        "risk is independent of the others (no covariance) -- likely wrong in practice, since monsoon-driven "
-        "crops' prices tend to move together."
+        "- **Profit risk is sqrt(x' Σ x)** from the historical revenue covariance (about 18 years, 8 crops), "
+        "so crops that move together count as concentrated. It is a reported metric; in risk-aware mode the "
+        "optimizer minimises risk per rupee of expected profit, so leaving land fallow cannot look safe."
     )

@@ -262,3 +262,22 @@ def test_ablation_b2_loss_nonnegative_for_all_variants(params):
         row = ablation._lp_strategy_row(variant_name, "test", "B2", decisions["B2"], full_decisions["B2"], full_params, scenario)
         assert row["feasible"]
         assert row["profit_loss_rs_vs_full"] >= -1e-3 * max(1.0, abs(row["profit_under_full"])), variant_name
+
+
+def test_risk_aware_plan_does_not_idle_land_to_look_safe(params, risk_inputs, scenario):
+    """Absolute risk sqrt(x'Sigma x) can be lowered by not planting; risk per rupee of
+    profit cannot. With a very risk-heavy weight vector the per-profit plan must still
+    crop the farm about as fully as the risk-neutral Model A plan, and be no riskier per
+    rupee of profit than it."""
+    from agriopt.optim.baselines import evaluate, nsga2_recommended
+    from agriopt.optim.solvers import nsga3_recommended
+
+    scen, _ = scenario
+    S = risk_inputs.Sigma
+    x_a, _, _, _ = nsga2_recommended(params, scen, seed=42)
+    x_cv, _, _, _ = nsga3_recommended(params, scen, S, weights=(0.1, 0.05, 0.05, 0.8), seed=42)
+    r_a, r_cv = evaluate(x_a, params, scen, Sigma=S), evaluate(x_cv, params, scen, Sigma=S)
+
+    cropped = lambda r: r["kharif_land"] + r["rabi_land"]  # noqa: E731
+    assert cropped(r_cv) >= 0.9 * cropped(r_a), (cropped(r_cv), cropped(r_a))
+    assert r_cv["profit_risk"] / r_cv["profit"] <= r_a["profit_risk"] / r_a["profit"] + 1e-9

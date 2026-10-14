@@ -308,7 +308,9 @@ def _build_preset_results(params_block: dict, Sigma_conservative: np.ndarray, cu
         )
         print(f"  preset={name!r}: land={land_ha} water_budget={water_budget:.1f} region={scenario.region} basis={scenario.water_basis}")
 
-        result_normal = run_pipeline(params_df, scenario, weights, seed=42, current_mix_share=current_mix_share)
+        result_normal = run_pipeline(
+            params_df, scenario, weights, seed=42, Sigma=Sigma_conservative, current_mix_share=current_mix_share
+        )
         result_risk_aware = run_pipeline(
             params_df, scenario, weights, risk_aware=True, weights4=weights4, Sigma=Sigma_conservative, seed=42,
             current_mix_share=current_mix_share,

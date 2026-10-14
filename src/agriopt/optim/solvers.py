@@ -332,13 +332,16 @@ def solve_nsga3(
     n_partitions: int = NSGA3_N_PARTITIONS,
     gens: int = 200,
     seed: int = 42,
+    risk_measure: str = "cv",
 ):
     """Returns (X, F, runtime_seconds). F columns = [profit (positive),
-    water_m3, fert_kg, risk_rs] -- same profit sign-flip convention as
-    solve_nsga2. Population size = number of Das-Dennis reference
-    directions (standard NSGA-III practice)."""
+    water_m3, fert_kg, risk] -- same profit sign-flip convention as
+    solve_nsga2; risk is risk per rupee of expected profit for
+    risk_measure="cv" (default) or absolute sqrt(x' Sigma x) in rupees for
+    "absolute" (see problem_risk). Population size = number of Das-Dennis
+    reference directions (standard NSGA-III practice)."""
     ref_dirs = get_reference_directions("das-dennis", 4, n_partitions=n_partitions)
-    problem = CropAllocationProblemRisk(params_df, scenario, Sigma)
+    problem = CropAllocationProblemRisk(params_df, scenario, Sigma, risk_measure=risk_measure)
     algorithm = NSGA3(ref_dirs=ref_dirs, pop_size=len(ref_dirs))
 
     t0 = time.perf_counter()
@@ -362,9 +365,12 @@ def nsga3_recommended(
     n_partitions: int = NSGA3_N_PARTITIONS,
     gens: int = 200,
     seed: int = 42,
+    risk_measure: str = "cv",
 ):
     """Returns (x_recommended, X_front, F_front, runtime)."""
-    X, F, runtime = solve_nsga3(scenario, params_df, Sigma, n_partitions=n_partitions, gens=gens, seed=seed)
+    X, F, runtime = solve_nsga3(
+        scenario, params_df, Sigma, n_partitions=n_partitions, gens=gens, seed=seed, risk_measure=risk_measure
+    )
     if len(X) == 0:
         return None, X, F, runtime
     idx = recommend(F, weights)

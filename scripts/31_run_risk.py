@@ -237,19 +237,19 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
     Sigma = risk_inputs.Sigma
 
     x1 = current_mix(params_df, scenario)
-    r1 = evaluate(x1, params_df, scenario)
+    r1 = evaluate(x1, params_df, scenario, Sigma=Sigma)
 
     x2, _ = solve_lp_profit_max(scenario, params_df)
-    r2 = evaluate(x2, params_df, scenario)
+    r2 = evaluate(x2, params_df, scenario, Sigma=Sigma)
 
     x3 = same_profit_min_water(params_df, scenario, min_profit=r1["profit"])
-    r3 = evaluate(x3, params_df, scenario) if x3 is not None else None
+    r3 = evaluate(x3, params_df, scenario, Sigma=Sigma) if x3 is not None else None
 
     x4, Xf_A, Ff_A, rt_A = nsga2_recommended(params_df, scenario, seed=42)
-    r4 = evaluate(x4, params_df, scenario) if x4 is not None else None
+    r4 = evaluate(x4, params_df, scenario, Sigma=Sigma) if x4 is not None else None
 
     xB, Xf_B, Ff_B, rt_B = nsga3_recommended(params_df, scenario, Sigma, weights=MODEL_B_WEIGHTS, seed=42)
-    rB = evaluate(xB, params_df, scenario) if xB is not None else None
+    rB = evaluate(xB, params_df, scenario, Sigma=Sigma) if xB is not None else None
 
     strategies = {"B1": (x1, r1), "B2": (x2, r2), "B3": (x3, r3), "OURS_A": (x4, r4), "ModelB": (xB, rB)}
 
@@ -268,6 +268,7 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
                 "fert_kg": r["fert_kg"],
                 "n_crops": r["n_crops"],
                 "portfolio_risk_rs": risk_val,
+                "risk_per_profit": risk_val / r["profit"] if r["profit"] > 0 else float("nan"),
                 "scenario_n_years": hs["n_years"],
                 "scenario_mean": hs["mean"],
                 "scenario_worst_year_profit": hs["worst_year_profit"],
@@ -290,7 +291,7 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
         Sigma_sens, _ = sigma_with_overridden_std(risk_inputs, R, {"sugarcane": median_other_std})
 
         xB_sens, _, _, _ = nsga3_recommended(params_df, scenario, Sigma_sens, weights=MODEL_B_WEIGHTS, seed=42)
-        r_sens = evaluate(xB_sens, params_df, scenario) if xB_sens is not None else None
+        r_sens = evaluate(xB_sens, params_df, scenario, Sigma=Sigma_sens) if xB_sens is not None else None
 
         sc_idx = crops.index("sugarcane")
         sens = {
@@ -310,6 +311,7 @@ def run_focus_scenario(params_df: pd.DataFrame, water_budget: float, risk_inputs
         "rows": rows,
         "min_risk_curve": (curve_profit, curve_risk),
         "nsga3_front": (Xf_B, Ff_B),
+        "Sigma": Sigma,
         "nsga3_runtime": rt_B,
         "crops": crops,
         "sugarcane_sensitivity": sens,
@@ -332,7 +334,7 @@ def write_risk_strategies_report(result: dict) -> pd.DataFrame:
         "mean-centered per allocation (see agriopt.optim.risk).\n\n"
     )
 
-    cols = ["strategy", "profit", "water_m3", "fert_kg", "n_crops", "portfolio_risk_rs", "scenario_n_years", "scenario_mean", "scenario_worst_year_profit", "scenario_worst_year", "scenario_P10", "scenario_n_loss_years", "feasible"]
+    cols = ["strategy", "profit", "water_m3", "fert_kg", "n_crops", "portfolio_risk_rs", "risk_per_profit", "scenario_n_years", "scenario_mean", "scenario_worst_year_profit", "scenario_worst_year", "scenario_P10", "scenario_n_loss_years", "feasible"]
     lines.append("| " + " | ".join(cols) + " |\n")
     lines.append("|" + "---|" * len(cols) + "\n")
     for _, row in df.iterrows():
@@ -429,7 +431,9 @@ def plot_risk(result: dict) -> None:
     curve_profit, curve_risk = result["min_risk_curve"]
     fig, ax = plt.subplots(figsize=(8, 6))
     if Ff_B is not None and len(Ff_B):
-        sc = ax.scatter(Ff_B[:, 0], Ff_B[:, 3], c=Ff_B[:, 1], cmap="viridis", s=20, alpha=0.7, label="NSGA-III front")
+        # F[:, 3] is risk PER RUPEE of profit (the objective); the reference curve is absolute Rs, so plot absolute risk
+        abs_risk = np.array([portfolio_risk(x, result["Sigma"]) for x in Xf_B])
+        sc = ax.scatter(Ff_B[:, 0], abs_risk, c=Ff_B[:, 1], cmap="viridis", s=20, alpha=0.7, label="NSGA-III front")
         fig.colorbar(sc, ax=ax, label="water (m3)")
     if len(curve_profit):
         ax.plot(curve_profit, curve_risk, "k--", linewidth=1.5, label="min-risk reference (SLSQP)")

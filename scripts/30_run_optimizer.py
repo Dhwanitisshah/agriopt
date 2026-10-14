@@ -24,6 +24,7 @@ from agriopt.config import CROPS, REPORTS_RESULTS
 from agriopt.optim.baselines import current_mix, evaluate, nsga2_recommended, profit_max, same_profit_min_water
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
+from agriopt.optim.risk import build_risk_inputs
 from agriopt.optim.solvers import exact_front_lp, solve_nsga2
 
 WATER_MULTIPLIERS = {"tight": 0.7, "current": 1.0, "relaxed": 1.3}
@@ -50,19 +51,32 @@ def pct_change(new: float, base: float) -> float:
     return (new - base) / abs(base) * 100
 
 
+_SIGMA_MEMO: dict[tuple, np.ndarray] = {}
+
+
+def sigma_for(params_df: pd.DataFrame) -> np.ndarray:
+    """Revenue covariance (Rs^2) for this params_df. Sigma = dev_cov * outer(R, R)
+    with R = yield x price, so it differs by price mode -- memoised on R."""
+    key = tuple(np.round((params_df["yield_qtl_ha"] * params_df["price"]).to_numpy(dtype=float), 6))
+    if key not in _SIGMA_MEMO:
+        _SIGMA_MEMO[key] = build_risk_inputs(params_df, list(params_df.index)).Sigma
+    return _SIGMA_MEMO[key]
+
+
 def run_scenario(water_label: str, price_mode: str, x1: np.ndarray, params_df: pd.DataFrame, water_budget: float) -> dict:
     scenario = Scenario(water_budget_m3=water_budget, land_ha=LAND_HA, price_mode=price_mode)
+    Sigma = sigma_for(params_df)  # profit_risk = sqrt(x' Sigma x), counting crop co-movement
 
-    r1 = evaluate(x1, params_df, scenario)
+    r1 = evaluate(x1, params_df, scenario, Sigma=Sigma)
 
     x2 = profit_max(params_df, scenario)
-    r2 = evaluate(x2, params_df, scenario) if x2 is not None else None
+    r2 = evaluate(x2, params_df, scenario, Sigma=Sigma) if x2 is not None else None
 
     x3 = same_profit_min_water(params_df, scenario, min_profit=r1["profit"])
-    r3 = evaluate(x3, params_df, scenario) if x3 is not None else None
+    r3 = evaluate(x3, params_df, scenario, Sigma=Sigma) if x3 is not None else None
 
     x4, X_front, F_front, nsga_runtime = nsga2_recommended(params_df, scenario, seed=42)
-    r4 = evaluate(x4, params_df, scenario) if x4 is not None else None
+    r4 = evaluate(x4, params_df, scenario, Sigma=Sigma) if x4 is not None else None
 
     return {
         "scenario": (water_label, price_mode),

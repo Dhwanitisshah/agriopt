@@ -36,9 +36,17 @@ FEASIBILITY_TOL = 1e-6
 # --- Shared scorer -------------------------------------------------------------
 
 
-def evaluate(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> dict:
+def evaluate(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenario, Sigma: np.ndarray | None = None) -> dict:
     """Score one allocation vector x (hectares per crop, same order as
-    params_df.index) against the scenario's constraints and objectives."""
+    params_df.index) against the scenario's constraints and objectives.
+
+    `Sigma` (crops x crops revenue covariance, Rs^2, same order as params_df)
+    makes `profit_risk` the real portfolio risk sqrt(x' Sigma x), which counts
+    the crops' co-movement (rice and soybean prices rise and fall together, so
+    diversifying across them buys less than independence suggests). Without
+    it `profit_risk` falls back to the independent-crops figure -- an
+    UNDERSTATEMENT of risk for concentrated, correlated plans -- so callers
+    that show risk to a user should pass Sigma."""
     crops = list(params_df.index)
     x = np.asarray(x, dtype=float)
 
@@ -59,12 +67,12 @@ def evaluate(x: np.ndarray, params_df: pd.DataFrame, scenario: Scenario) -> dict
     food_share = food_share_of(x, params_df, scenario.land_ha)
     n_crops = int((x > 0.1).sum())
 
-    # profit_risk = sqrt(sum((x_i * profit_std_i)^2)) -- treats each crop's
-    # price risk as INDEPENDENT of every other crop's (no covariance term),
-    # which is almost certainly wrong in practice (monsoon-driven crops'
-    # prices tend to move together), but is a simple, clearly-labeled
-    # reported risk metric, not an optimization objective.
-    profit_risk = float(np.sqrt(np.sum((x * std_v) ** 2)))
+    if Sigma is not None:
+        profit_risk = float(np.sqrt(max(float(x @ np.asarray(Sigma, dtype=float) @ x), 0.0)))
+    else:
+        # fallback: sqrt(sum((x_i * profit_std_i)^2)) treats each crop's price
+        # risk as INDEPENDENT of every other crop's (no covariance term).
+        profit_risk = float(np.sqrt(np.sum((x * std_v) ** 2)))
 
     feasible = (
         kharif_land <= scenario.land_ha + FEASIBILITY_TOL

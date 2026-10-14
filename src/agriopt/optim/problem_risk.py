@@ -2,7 +2,11 @@
 portfolio-risk objective to problem.CropAllocationProblem's 3).
 
 Objectives (pymoo minimize-form): f1 = -profit, f2 = water_m3, f3 = fert_kg,
-f4 = portfolio_risk(x) = sqrt(x' Sigma x)  (nonlinear, from agriopt.optim.risk).
+f4 = risk, nonlinear, from agriopt.optim.risk. By default risk is
+sqrt(x' Sigma x) / profit(x) -- risk per rupee of expected profit
+(risk_measure="cv"). The absolute sqrt(x' Sigma x) in rupees
+(risk_measure="absolute") rewards leaving land fallow, since an empty field has
+zero risk; it is kept only to reproduce the pre-fix behaviour.
 Constraints: identical to CropAllocationProblem (kharif/rabi land, water,
 food share) -- risk is an objective here, not a constraint.
 """
@@ -13,13 +17,16 @@ import pandas as pd
 from pymoo.core.problem import Problem
 
 from agriopt.optim.problem import Scenario, food_requirement, food_weights
-from agriopt.optim.risk import portfolio_risk_vectorized
+from agriopt.optim.risk import portfolio_risk_vectorized, risk_per_profit_vectorized
 
 
 class CropAllocationProblemRisk(Problem):
     """Vectorized pymoo Problem: n_var = n_crops, n_obj = 4, n_constr = 4."""
 
-    def __init__(self, params_df: pd.DataFrame, scenario: Scenario, Sigma: np.ndarray):
+    def __init__(self, params_df: pd.DataFrame, scenario: Scenario, Sigma: np.ndarray, risk_measure: str = "cv"):
+        if risk_measure not in ("cv", "absolute"):
+            raise ValueError(f"risk_measure must be 'cv' or 'absolute', got {risk_measure!r}")
+        self.risk_measure = risk_measure
         self.crops = list(params_df.index)
         self.params = params_df
         self.scenario = scenario
@@ -41,7 +48,10 @@ class CropAllocationProblemRisk(Problem):
         profit = X @ self.profit
         water = X @ self.water
         fert = X @ self.fert
-        risk = portfolio_risk_vectorized(X, self.Sigma)
+        if self.risk_measure == "cv":
+            risk = risk_per_profit_vectorized(X, self.Sigma, self.profit)
+        else:
+            risk = portfolio_risk_vectorized(X, self.Sigma)
 
         out["F"] = np.column_stack([-profit, water, fert, risk])
 

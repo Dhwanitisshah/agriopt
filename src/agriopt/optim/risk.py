@@ -222,6 +222,28 @@ def portfolio_risk_vectorized(X: np.ndarray, Sigma: np.ndarray) -> np.ndarray:
     return np.sqrt(np.clip(var, 0.0, None))
 
 
+# Risk per rupee of expected profit (the coefficient of variation of profit).
+# sqrt(x' Sigma x) alone is an ABSOLUTE rupee amount, so an optimizer can lower
+# it by simply not planting: an empty field has zero risk. Dividing by the
+# plan's own expected profit makes the measure scale-free -- halving every
+# crop's hectares halves both numerator and denominator -- so leaving land
+# fallow buys no risk reduction. A plan with no real profit has no meaningful
+# ratio and is given the cap (worst) value.
+RISK_CV_CAP = 5.0
+RISK_MIN_PROFIT_RS = 1.0
+
+
+def risk_per_profit_vectorized(X: np.ndarray, Sigma: np.ndarray, profit_ha: np.ndarray) -> np.ndarray:
+    """sqrt(x' Sigma x) / (x . profit_ha) for each row of X, capped at RISK_CV_CAP;
+    rows whose expected profit is not positive get RISK_CV_CAP."""
+    sd = portfolio_risk_vectorized(X, Sigma)
+    profit = np.asarray(X, dtype=float) @ np.asarray(profit_ha, dtype=float)
+    ratio = np.full(len(sd), RISK_CV_CAP)
+    ok = profit > RISK_MIN_PROFIT_RS
+    ratio[ok] = np.minimum(sd[ok] / profit[ok], RISK_CV_CAP)
+    return ratio
+
+
 def _active_profit_series(x: np.ndarray, risk_inputs: RiskInputs, R: np.ndarray, cost: np.ndarray):
     """Shared setup for historical_scenarios/bootstrap_profit_resampled:
     restrict to crops with x_i>0 and years where ALL of those crops have

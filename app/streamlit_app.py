@@ -140,7 +140,7 @@ elif sidebar_inputs.run_clicked or st.session_state["scenario_result"] is None:
             weights,
             risk_aware=sidebar_inputs.risk_aware,
             weights4=sidebar_inputs.weights4,
-            Sigma=risk_inputs.Sigma if sidebar_inputs.risk_aware else None,
+            Sigma=risk_inputs.Sigma,
             current_mix_share=current_mix_share,
         )
 

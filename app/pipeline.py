@@ -181,7 +181,13 @@ def run_pipeline(
     plan ("OURS") instead comes from NSGA-III over 4 objectives
     (profit/water/fert/risk, Phase 5's Model B) -- both runs are cheap
     enough (NSGA-II ~0.5s + NSGA-III ~1-2s) to stay well under the 10s
-    budget even combined."""
+    budget even combined.
+
+    `Sigma` (revenue covariance, crops in params_df order) is what the
+    reported "Profit risk" is computed from -- sqrt(x' Sigma x), which counts
+    the crops' co-movement -- so pass it whether or not `risk_aware` is set;
+    `risk_aware` only decides whether NSGA-III uses it as an objective.
+    Without it, profit risk falls back to the independent-crops figure."""
     x2, _ = solve_lp_profit_max(scenario, params_df)
     if x2 is None:
         return ScenarioResult(
@@ -192,14 +198,14 @@ def run_pipeline(
         )
 
     x1 = current_mix(params_df, scenario, precomputed_share=current_mix_share)
-    r1 = evaluate(x1, params_df, scenario)
-    r2 = evaluate(x2, params_df, scenario)
+    r1 = evaluate(x1, params_df, scenario, Sigma=Sigma)
+    r2 = evaluate(x2, params_df, scenario, Sigma=Sigma)
 
     x3 = same_profit_min_water(params_df, scenario, min_profit=r1["profit"])
-    r3 = evaluate(x3, params_df, scenario) if x3 is not None else None
+    r3 = evaluate(x3, params_df, scenario, Sigma=Sigma) if x3 is not None else None
 
     x4a, X_front, F_front, runtime_a = nsga2_recommended(params_df, scenario, weights=weights, pop=pop, gens=gens, seed=seed)
-    r4a = evaluate(x4a, params_df, scenario) if x4a is not None else None
+    r4a = evaluate(x4a, params_df, scenario, Sigma=Sigma) if x4a is not None else None
 
     x_rec, r_rec, runtime_total = x4a, r4a, runtime_a
     risk_aware_failed = False
@@ -216,7 +222,7 @@ def run_pipeline(
 
         runtime_total = runtime_a + runtime_b
         if x4b is not None:
-            x_rec, r_rec = x4b, evaluate(x4b, params_df, scenario)
+            x_rec, r_rec = x4b, evaluate(x4b, params_df, scenario, Sigma=Sigma)
         elif not risk_aware_failed:
             # NSGA-III ran without raising but returned no feasible
             # solution (empty front) -- same user-facing fallback.
