@@ -242,3 +242,54 @@ price shock moved profit but not risk. New tests (`tests/test_risk_follows_scena
 reproduce the cache for both sugarcane modes; a rice +20% shock multiplies rice variance by 1.44 and its
 covariances by 1.2 and leaves the other crops untouched; the FRP override rescales sugarcane risk; MSP mode gets
 its own PSD Sigma; cached preset profit risk equals the request-time value.
+
+### Task 7 -- backtest validity (H4)
+
+**(a) Look-ahead removed.** The optimizer makes one joint kharif+rabi decision, but rabi prices were read in
+*October* while kharif was planned in *May*. Every crop is now planned on 1 May of year t
+(`info.PLAN_MONTH`); rabi prices are the naive carry-forward of the last price at or before May. I chose
+one May planning date over a two-stage plan because the long-duration crops (cotton, tur, sugarcane) commit land in
+both seasons and the NSGA solvers would need a staged formulation; the single date is the conservative reading
+(a farmer who sees October prices before sowing wheat is better informed than this). `info_set="season"`
+reproduces the old behaviour. A/B on identical code (`scripts/62_backtest_skill.py`, mean realized profit per
+year over 2016-2019, Rs, 10 ha):
+
+| scenario | strategy | May info (headline) | legacy Oct look-ahead | look-ahead flattered by |
+|---|---|---|---|---|
+| default | OURS | 230,769 | 232,036 | +1,267 |
+| default | B2 | 288,084 | 288,084 | 0 |
+| tight | OURS | 200,645 | 208,052 | +7,407 |
+| tight | B2 | 259,036 | 259,036 | 0 |
+
+The look-ahead did not matter for the profit-max LP (wheat/jowar never entered its plan) and flattered OURS by
+0.5-3.7%. New tests: every price origin is <= 1 May of t; the legacy option still reads wheat in October.
+
+**(b) The backtest can now measure forecast skill.** B2 and ORACLE disagree in 8/8 headline cells. Added
+`ORACLE_PRICE` (realized prices, forecast yields) and `ORACLE_YIELD` (the reverse) and a no-sugarcane variant
+(`reports/results/backtest_skill.md`):
+
+| variant / water | B2 | ORACLE | B2 capture | gap closed by price foresight | by yield foresight |
+|---|---|---|---|---|---|
+| all crops / default | 288,084 | 339,253 | 85% | 35% | 68% |
+| all crops / tight | 259,036 | 295,022 | 88% | 37% | 64% |
+| no sugarcane / default | 284,212 | 317,630 | 89% | -1% | 52% |
+| no sugarcane / tight | 252,365 | 290,120 | 87% | 18% | 87% |
+
+Most of what perfect foresight would add comes from yields, not prices (the two overlap, so shares are not
+additive). Dropping sugarcane barely moves B2's capture (85-89%), so sugarcane is not what hid the skill signal.
+OURS is *not* the best realized-profit strategy: it trades profit for water and fertilizer (pseudo-weights 0.5 /
+0.3 / 0.2). Headline (May info, all crops, mean realized profit per year): default B1 229,479, B2 288,084,
+B3 220,337, OURS 230,769, MODEL_B 259,420; tight B1 229,479, B2 259,036, B3 228,429, OURS 200,645,
+MODEL_B 197,695. These are after the Task 3-6 changes, so they differ from the Phase 1 table
+(e.g. B1 162,225 -> 229,479, because B1 now uses all its land and the water budgets scale with it).
+
+**(c) p-values dropped.** With n=4 the smallest attainable two-sided sign / Wilcoxon p is 0.125, so neither can
+ever reject. `60_backtest.py` no longer computes them; it writes `backtest_deltas.csv` and a per-year delta
+table (OURS and MODEL_B minus B1) in `backtest_summary.md`. The README no longer quotes sign p=0.625 /
+Wilcoxon p=0.25.
+
+**(d) All baselines.** `61_backtest_v2.py` adds `mean_realized_profit` for every strategy to the win summary and
+writes `backtest_deltas_v2.csv` (OURS / MODEL_B minus B1, B1_SCALED, B2 and B3, per year and scenario) plus a
+section 5 table in `backtest_summary_v2.md`. The README backtest row will list all of them. The app's Backtest tab
+caption claimed "B2 and ORACLE are identical in every year/scenario" (false even before this change); it now
+describes the real situation.

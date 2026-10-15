@@ -14,6 +14,7 @@ from agriopt.backtest.info import (
     build_realized_params_df,
     build_risk_inputs_leakfree,
     current_mix_leakfree,
+    hybrid_params_df,
     load_msp_history,
 )
 from agriopt.config import CROPS, MSP_HISTORY_CSV
@@ -76,6 +77,61 @@ def test_price_origin_month_precedes_realized_harvest_window(t):
         windows = HARVEST_WINDOW_MONTHS[season]
         harvest_months = [pd.Timestamp(year=t + offset, month=month, day=1) for offset, month in windows]
         assert all(origin < h for h in harvest_months), f"{crop}: origin {origin} not strictly before harvest window {harvest_months}"
+
+
+# --- no-leakage: ONE planning date (1 May); rabi prices are not read in October ---
+
+
+@pytest.mark.parametrize("t", [2016, 2018, 2020])
+def test_every_price_origin_is_at_or_before_the_planning_date(t):
+    """The optimizer makes one joint kharif+rabi decision, so no crop's price may be
+    read after the day the kharif crops are sown (1 May of year t). An earlier
+    version read rabi prices in October (a 5-month look-ahead)."""
+    from agriopt.backtest.info import PLAN_MONTH
+
+    _, info = build_forecast_params_df(t, crops=CROPS)
+    assert info["info_set"] == "may"
+    for crop, origin_str in info["price_origin_months"].items():
+        if origin_str is None:  # sugarcane: FRP announced before the season
+            continue
+        assert pd.Timestamp(origin_str) <= pd.Timestamp(year=t, month=PLAN_MONTH, day=1), (crop, origin_str)
+
+
+def test_legacy_season_info_set_still_reads_rabi_prices_in_october():
+    """Documents what the look-ahead was: wheat/jowar read in October. Only for
+    the sensitivity run in scripts/62_backtest_skill.py."""
+    _, info = build_forecast_params_df(2018, crops=["wheat", "rice"], info_set="season")
+    assert info["price_origin_months"]["wheat"] == "2018-10-01"
+    assert info["price_origin_months"]["rice"] == "2018-05-01"
+
+
+def test_hybrid_params_swap_only_the_requested_component():
+    t = 2018
+    crops = ["rice", "wheat", "tur"]
+    forecast, _ = build_forecast_params_df(t, crops=crops)
+    realized, missing = build_realized_params_df(t, crops=crops)
+    assert not missing
+    price_only = hybrid_params_df(forecast, realized, realized_price=True, realized_yield=False)
+    yield_only = hybrid_params_df(forecast, realized, realized_price=False, realized_yield=True)
+
+    np.testing.assert_allclose(price_only["price"], realized["price"])
+    np.testing.assert_allclose(price_only["yield_qtl_ha"], forecast["yield_qtl_ha"])
+    np.testing.assert_allclose(yield_only["yield_qtl_ha"], realized["yield_qtl_ha"])
+    np.testing.assert_allclose(yield_only["price"], forecast["price"])
+    for hybrid in (price_only, yield_only):  # planned per-ha cost is kept; profit stays consistent
+        np.testing.assert_allclose(hybrid["cost_ha"], forecast["cost_ha"])
+        np.testing.assert_allclose(hybrid["profit_ha"], hybrid["yield_qtl_ha"] * hybrid["price"] - hybrid["cost_ha"])
+
+
+def test_partial_foresight_oracles_are_reported_and_bounded_by_oracle():
+    backtest = _load_backtest_module()
+    rows, _ = backtest.run_year(2018)
+    df = pd.DataFrame(rows)
+    for scenario_label, sdf in df.groupby("scenario"):
+        by = sdf.set_index("strategy")["realized_profit"]
+        for name in ("ORACLE_PRICE", "ORACLE_YIELD"):
+            assert name in by.index and pd.notna(by[name]), (scenario_label, name)
+            assert by[name] <= by["ORACLE"] + 1e-3 * max(1.0, abs(by["ORACLE"]))
 
 
 # --- no-leakage: risk Sigma's deviation matrix ------------------------------

@@ -77,10 +77,15 @@ For decision year `t` (sowing ~June `t`):
   Models are cached under `models/backtest/` (gitignored via the existing
   root `/models/` pattern).
 - **Price forecast**: naive = last observed monthly modal price at the
-  decision month, ffilled to the same convention `build_wide_price_table`
-  already uses. **ASSUMPTION**: kharif crops (incl. cotton/tur, which are
-  Kharif-sown even though they occupy both seasons' land) use May of year
-  `t`; rabi crops use October of year `t`. Sugarcane has no mandi series --
+  planning date, ffilled to the same convention `build_wide_price_table`
+  already uses. **ASSUMPTION**: the optimizer makes ONE joint kharif+rabi
+  decision (cotton, tur and sugarcane hold land in both seasons), so every
+  crop is planned on 1 May of year `t` and rabi crops' prices are the last
+  price at or before May -- not October, which a May decision cannot see.
+  (An earlier version read rabi prices in October; `info_set="season"`
+  reproduces it, and `reports/results/backtest_skill.md` quantifies what the
+  look-ahead was worth: about +1,300 Rs/yr for OURS at default water and
+  +7,400 at tight.) Sugarcane has no mandi series --
   its "price forecast" is simply `FRP_t` from `msp_history.csv`, which is
   legitimately known ahead of sowing (the government announces FRP before
   the season, it isn't discovered at harvest).
@@ -159,9 +164,23 @@ crops.
 
 ## 5. Statistics
 
-Paired sign test + Wilcoxon signed-rank on (OURS - B1) and (MODEL_B - B1)
-realized-profit differences, per scenario, over the years with a realized
-outcome for both (**n=4** here, not 5, per the 2020 data gap above).
-**Stated plainly in every report this phase writes: n=4 gives essentially no
-statistical power. These p-values are exploratory/directional signals only
--- not evidence of a significant effect in either direction.**
+No significance test is reported. Only four years (2016-2019) have a realized
+outcome (the 2020 data gap above), and with n=4 the smallest attainable
+two-sided p-value of a sign or Wilcoxon signed-rank test is 0.125 -- no test
+can ever reject at 5%. Instead the reports list the per-year realized-profit
+delta of OURS and MODEL_B against every baseline (B1, B1_SCALED, B2, B3), per
+scenario: `backtest_deltas.csv` (vs B1) and `backtest_deltas_v2.csv` (vs all).
+Read them as four case studies.
+
+### Forecast-skill checks (`scripts/62_backtest_skill.py`)
+
+* **B2 vs ORACLE**: both are profit-max LPs over the same feasible region, so if
+  forecast and realized profit rank crops identically they land on the same
+  vertex and the backtest cannot rank forecasters. The script counts the cells
+  in which B2's allocation differs from ORACLE's.
+* **ORACLE_PRICE / ORACLE_YIELD** plan with only the realized prices (yields
+  forecast) or only the realized yields (prices forecast), splitting the gap
+  between B2 and ORACLE into a price part and a yield part.
+* **No-sugarcane variant**: sugarcane has the highest net profit per hectare
+  and a price known in advance (FRP), so it can mask forecast skill on the
+  market crops.

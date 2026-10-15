@@ -53,15 +53,29 @@ from sklearn.ensemble import RandomForestRegressor
 
 PRICE_STD_LOOKBACK_MONTHS = 36
 
-# ASSUMPTION -- decision month per season: kharif crops (sown ~June) are
-# planned off the last observed mandi price in MAY of year t; rabi crops
-# (sown ~Oct-Dec) off OCTOBER of year t. Cotton/tur are Kharif-sown
-# (BOTH_SEASON_CROPS but MAIN_SEASON="Kharif") so they use the May origin
-# too. Sugarcane has no mandi series -- its "price forecast" is simply the
-# FRP for year t from msp_history.csv, which is legitimately known ahead of
-# sowing (FRP is announced by the government before the season, not
-# discovered at harvest).
-DECISION_MONTH = {"Kharif": 5, "Rabi": 10}
+# ASSUMPTION -- ONE planning date. The optimizer chooses a single joint
+# kharif+rabi allocation (long-duration crops such as cotton, tur and
+# sugarcane commit land in both seasons), so every price it sees must be known
+# on the day the kharif crops are sown: 1 MAY of year t (PLAN_MONTH). Rabi
+# crops' prices are therefore the naive carry-forward of the last mandi price
+# at or before May -- NOT the October price, which a May decision cannot see.
+# Sugarcane has no mandi series -- its "price forecast" is simply the FRP for
+# year t from msp_history.csv, which is legitimately known ahead of sowing
+# (FRP is announced by the government before the season, not discovered at
+# harvest).
+#
+# info_set="season" is the earlier, look-ahead convention (rabi prices read in
+# OCTOBER while the plan is made in May). It is kept only to quantify how much
+# that look-ahead was worth; never use it for a headline number.
+PLAN_MONTH = 5
+DECISION_MONTH = {"Kharif": 5, "Rabi": 10}  # legacy, info_set="season" only
+INFO_SETS = ("may", "season")
+
+
+def _plan_month(crop: str, info_set: str) -> int:
+    if info_set not in INFO_SETS:
+        raise ValueError(f"info_set must be one of {INFO_SETS}, got {info_set!r}")
+    return PLAN_MONTH if info_set == "may" else DECISION_MONTH[MAIN_SEASON[crop]]
 
 
 # --- 0) MSP/cost history --------------------------------------------------
@@ -190,9 +204,10 @@ def yield_forecast_for_year(t: int, model, num_cols: list[str], train_max_year: 
 # --- 2) Price forecast: naive at the decision month -----------------------
 
 
-def price_forecast_for_year(t: int, crops: list[str], msp_hist: pd.DataFrame) -> dict:
+def price_forecast_for_year(t: int, crops: list[str], msp_hist: pd.DataFrame, info_set: str = "may") -> dict:
     """Naive price forecast Rs/qtl per crop: last observed monthly modal
-    price at (or before, ffilled) the crop's decision month in year t.
+    price at (or before, ffilled) the planning month of year t (1 May for
+    every crop by default -- see PLAN_MONTH).
     Sugarcane uses FRP_t from msp_history.csv (announced ahead of the
     season, so legitimately known at decision time, not a forecast)."""
     price_df = load_price_frame()
@@ -207,8 +222,7 @@ def price_forecast_for_year(t: int, crops: list[str], msp_hist: pd.DataFrame) ->
             out[crop] = {"value": float(frp), "method": "FRP", "origin_month": None}
             continue
 
-        season = MAIN_SEASON[crop]
-        month = DECISION_MONTH[season]
+        month = _plan_month(crop, info_set)
         origin = pd.Timestamp(year=t, month=month, day=1)
         # ffilled lookup at-or-before origin, matching build_wide_price_table's
         # own ffill convention -- never look past `origin`.
@@ -272,9 +286,11 @@ def build_forecast_params_df(
     water_basis: str = "total_need",
     rainfall_scenario: str = "normal",
     region: str = "maharashtra",
+    info_set: str = "may",
 ) -> tuple[pd.DataFrame, dict]:
     """The full leak-free PLANNING info set for decision year t: refits the
-    yield model on year<=t-1, forecasts price naively at the decision month,
+    yield model on year<=t-1, forecasts price naively at the planning month
+    (1 May for all crops; info_set="season" is the legacy look-ahead variant),
     and derives cost from msp_history.csv. Returns (params_df, info) where
     `info` carries the leakage-relevant internals (train_max_year, the price
     origin months used, rf_params) for tests to assert on directly."""
@@ -283,7 +299,7 @@ def build_forecast_params_df(
 
     model, num_cols, meta = refit_yield_model_for_year(t)
     yields = yield_forecast_for_year(t, model, num_cols, meta["train_max_year"], crops=crops, state=state)
-    prices = price_forecast_for_year(t, crops, msp_hist)
+    prices = price_forecast_for_year(t, crops, msp_hist, info_set=info_set)
 
     price_df = load_price_frame()
     wide = build_wide_price_table(price_df)
@@ -295,7 +311,7 @@ def build_forecast_params_df(
         cost_qtl, cost_method = cost_for_year(crop, t, msp_hist, ref)
         row = _base_params_row(crop, yield_qtl_ha, price, cost_qtl, ref, water_basis, rainfall_scenario, region)
         origin_month = prices[crop]["origin_month"]
-        origin = pd.Timestamp(origin_month) if origin_month else pd.Timestamp(year=t, month=DECISION_MONTH[MAIN_SEASON[crop]] if crop != "sugarcane" else 6, day=1)
+        origin = pd.Timestamp(origin_month) if origin_month else pd.Timestamp(year=t, month=PLAN_MONTH, day=1)
         if crop == "sugarcane":
             row["profit_std_ha"] = row["yield_qtl_ha"] * row["price"] * SUGARCANE_REVENUE_CV
         else:
@@ -305,6 +321,7 @@ def build_forecast_params_df(
 
     params_df = pd.DataFrame(rows).set_index("crop")
     info = {
+        "info_set": info_set,
         "train_max_year": meta["train_max_year"],
         "rf_params": meta["rf_params"],
         "price_origin_months": {c: prices[c]["origin_month"] for c in crops},
@@ -374,6 +391,26 @@ def build_realized_params_df(
 
     params_df = pd.DataFrame(rows).set_index("crop") if rows else pd.DataFrame()
     return params_df, missing
+
+
+def hybrid_params_df(
+    forecast_params: pd.DataFrame, realized_params: pd.DataFrame, realized_price: bool, realized_yield: bool
+) -> pd.DataFrame:
+    """Planning params with PARTIAL foresight: the forecast table with the
+    realized price and/or the realized yield swapped in (per-hectare cost stays
+    the planned, sowing-time cost, exactly as commit_planned_costs does for the
+    full oracle). Used for the price-only and yield-only foresight oracles,
+    which split "how much would perfect foresight be worth" into the part due
+    to knowing prices and the part due to knowing yields. Crops without a
+    realized row keep their forecast."""
+    out = forecast_params.copy()
+    common = out.index.intersection(realized_params.index)
+    if realized_price:
+        out.loc[common, "price"] = realized_params.loc[common, "price"]
+    if realized_yield:
+        out.loc[common, "yield_qtl_ha"] = realized_params.loc[common, "yield_qtl_ha"]
+    out["profit_ha"] = out["yield_qtl_ha"] * out["price"] - out["cost_ha"]
+    return out
 
 
 def commit_planned_costs(realized_params: pd.DataFrame, forecast_params: pd.DataFrame) -> pd.DataFrame:

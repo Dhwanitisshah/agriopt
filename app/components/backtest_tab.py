@@ -43,7 +43,8 @@ def render_backtest_tab(backtest: dict | None) -> None:
         st.markdown(f"- {line}")
 
     st.caption(
-        "B2 (profit-max LP) and ORACLE are identical in every year/scenario tested -- both are profit-max LPs "
-        "over the same physical feasible region, so this is expected, not a coincidence (see RESULTS_INDEX.md, "
-        "row 'Backtest')."
+        "ORACLE plans with the realized yields and prices; B2 (the profit-max LP) plans with forecasts. Their "
+        "allocations differ in most year/scenario cells, so the gap between them measures forecast error "
+        "(see RESULTS_INDEX.md, row 'Backtest', and reports/results/backtest_skill.md for how much of it is "
+        "price and how much is yield). No p-values are shown: four paired years cannot support a significance test."
     )

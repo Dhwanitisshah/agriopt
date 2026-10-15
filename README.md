@@ -181,7 +181,7 @@ theme. See `requirements.txt` for the full dev/training dependency set.
 ## Limitations & future work
 
 - **n=4 backtest years** (2016-2019): Maharashtra's yield dataset has zero rows for 2020, so every
-  realized-outcome backtest metric (profit, win counts, Wilcoxon) is computed on 4 years, not the
+  realized-outcome backtest metric (profit, win counts, per-year deltas) is computed on 4 years, not the
   intended 5 -- low statistical power, read as directional only.
 - **State-level, not district-level**: every model and the optimizer operate on Maharashtra-wide
   (or, since Phase 8.1, IMD-subdivision-wide) figures; a real deployment would need district- or

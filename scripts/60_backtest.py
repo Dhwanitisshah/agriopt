@@ -5,7 +5,14 @@ ONLY information available before sowing (agriopt.backtest.info), then score
 that SAME plan twice -- once under the forecast/planning params (planned
 profit) and once under year t's REALIZED yield/price (realized profit).
 ORACLE plans directly against realized params -- a perfect-foresight upper
-bound no other strategy's realized profit should ever beat.
+bound no other strategy's realized profit should ever beat. ORACLE_PRICE and
+ORACLE_YIELD give partial foresight (realized prices with forecast yields, and
+the reverse) so the gap between B2 and ORACLE can be split into "prices we
+could not foresee" and "yields we could not foresee" (scripts/62_backtest_skill.py).
+
+Information set: every crop is planned on 1 May of year t (info.PLAN_MONTH);
+rabi prices are the naive carry-forward of the last price at or before May.
+An earlier version read rabi prices in October while planning in May.
 
 Two water scenarios per year ("default" = 1.0x B1's own water footprint that
 year, "tight" = 0.7x), matching the WATER_MULTIPLIERS convention used in
@@ -34,9 +41,15 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy import stats
 
-from agriopt.backtest.info import build_forecast_params_df, build_realized_params_df, build_risk_inputs_leakfree, commit_planned_costs, current_mix_leakfree
+from agriopt.backtest.info import (
+    build_forecast_params_df,
+    build_realized_params_df,
+    build_risk_inputs_leakfree,
+    commit_planned_costs,
+    current_mix_leakfree,
+    hybrid_params_df,
+)
 from agriopt.config import CROPS, REPORTS_RESULTS
 from agriopt.optim.baselines import evaluate, nsga2_recommended
 from agriopt.optim.problem import Scenario
@@ -50,7 +63,7 @@ MAX_SHARE = 0.5
 OURS_WEIGHTS = (0.5, 0.3, 0.2)  # matches baselines.nsga2_recommended's own default
 MODEL_B_WEIGHTS = (0.4, 0.2, 0.1, 0.3)  # matches scripts/31_run_risk.py's MODEL_B_WEIGHTS
 SEED = 0
-STRATEGY_ORDER = ["B1", "B2", "B3", "OURS", "MODEL_B", "ORACLE"]
+STRATEGY_ORDER = ["B1", "B2", "B3", "OURS", "MODEL_B", "ORACLE_PRICE", "ORACLE_YIELD", "ORACLE"]
 
 
 def evaluate_realized_profit(x, forecast_params: pd.DataFrame, realized_params: pd.DataFrame, missing_crops: list[str], scenario: Scenario) -> float | None:
@@ -74,25 +87,37 @@ def evaluate_realized_profit(x, forecast_params: pd.DataFrame, realized_params: 
     return float(evaluate(x, realized_full, scenario)["profit"])
 
 
-def run_year(t: int, water_basis: str = "total_need", rainfall_scenario: str = "normal") -> tuple[list[dict], dict]:
+def run_year(
+    t: int,
+    water_basis: str = "total_need",
+    rainfall_scenario: str = "normal",
+    info_set: str = "may",
+    crops: list[str] = CROPS,
+) -> tuple[list[dict], dict]:
     """water_basis/rainfall_scenario (Phase 8): defaults reproduce every
     pre-Phase-8 result unchanged; water_basis="net_irrigation" threads
     through to build_forecast_params_df/build_realized_params_df so the
     whole backtest (B1/B2/B3/OURS/MODEL_B/ORACLE) can be rerun under net
     irrigation water without any other code path changing -- see
-    scripts/70_water_basis_net.py and reports/results/water_basis_comparison.md."""
-    forecast_params, finfo = build_forecast_params_df(t, crops=CROPS, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
-    realized_params, missing_realized = build_realized_params_df(t, crops=CROPS, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
+    scripts/70_water_basis_net.py and reports/results/water_basis_comparison.md.
+
+    info_set ("may" default; "season" = legacy look-ahead, see info.PLAN_MONTH)
+    and crops (default all 8; pass a subset, e.g. without sugarcane, for the
+    forecast-skill variants in scripts/62_backtest_skill.py)."""
+    forecast_params, finfo = build_forecast_params_df(
+        t, crops=crops, water_basis=water_basis, rainfall_scenario=rainfall_scenario, info_set=info_set
+    )
+    realized_params, missing_realized = build_realized_params_df(t, crops=crops, water_basis=water_basis, rainfall_scenario=rainfall_scenario)
     realized_params = commit_planned_costs(realized_params, forecast_params)
     R = (forecast_params["yield_qtl_ha"] * forecast_params["price"]).to_numpy(dtype=float)
-    risk_inputs = build_risk_inputs_leakfree(t - 1, crops=CROPS, R=R)
+    risk_inputs = build_risk_inputs_leakfree(t - 1, crops=crops, R=R)
 
     dummy_scenario = Scenario(water_budget_m3=1e15, land_ha=LAND_HA, food_share_min=FOOD_SHARE_MIN, max_share=MAX_SHARE)
     x1_probe = current_mix_leakfree(forecast_params, dummy_scenario, t)
     b1_water_probe = float(x1_probe @ forecast_params["water_m3_ha"].to_numpy())
 
     rows = []
-    oracle_feasible = len(missing_realized) < len(CROPS)
+    oracle_feasible = len(missing_realized) < len(crops)
     # Phase 7.1 (scripts/61_backtest_v2.py) reuses these already-solved
     # allocations for fairness/water-matched-oracle/decomposition analysis
     # rather than resolving NSGA-II/NSGA-III a second time -- purely
@@ -142,8 +167,26 @@ def run_year(t: int, water_basis: str = "total_need", rainfall_scenario: str = "
                 "water_m3": r_oracle["water_m3"], "fert_kg": r_oracle["fert_kg"],
                 "feasible": r_oracle["feasible"], "forecast_error": 0.0, "missing_realized_crops": "",
             })
+            # partial foresight: know only the realized PRICE, or only the realized YIELD
+            for name, know_price, know_yield in (("ORACLE_PRICE", True, False), ("ORACLE_YIELD", False, True)):
+                hybrid = hybrid_params_df(forecast_params, realized_params, know_price, know_yield)
+                x_h, _ = solve_lp_profit_max(scenario, hybrid)
+                x_store[label][name] = x_h
+                if x_h is None:
+                    continue
+                r_h = evaluate(x_h, hybrid, scenario)
+                realized_h = evaluate_realized_profit(x_h, forecast_params, realized_params, missing_realized, scenario)
+                rows.append({
+                    "year": t, "scenario": label, "strategy": name,
+                    "planned_profit": r_h["profit"], "realized_profit": realized_h,
+                    "water_m3": r_h["water_m3"], "fert_kg": r_h["fert_kg"], "feasible": r_h["feasible"],
+                    "forecast_error": (realized_h - r_h["profit"]) if realized_h is not None else np.nan,
+                    "missing_realized_crops": ";".join(missing_realized),
+                })
         else:
             x_store[label]["ORACLE"] = None
+            x_store[label]["ORACLE_PRICE"] = None
+            x_store[label]["ORACLE_YIELD"] = None
             rows.append({"year": t, "scenario": label, "strategy": "ORACLE", "feasible": False, "planned_profit": np.nan,
                          "realized_profit": np.nan, "water_m3": np.nan, "fert_kg": np.nan, "forecast_error": np.nan,
                          "missing_realized_crops": ";".join(missing_realized)})
@@ -195,45 +238,36 @@ def build_summary(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def run_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """Paired sign test + Wilcoxon signed-rank on (OURS - B1) and
-    (MODEL_B - B1) realized-profit differences, per scenario, over
-    whichever years have a realized outcome for BOTH strategies (n=4 in
-    this run, 2016-2019 -- 2020 is excluded, see module docstring).
-    n<=5 either way: THESE P-VALUES ARE EXPLORATORY/DIRECTIONAL ONLY, not
-    evidence of a significant effect in either direction -- reported
-    plainly, not oversold, in backtest_findings.md."""
+def paired_deltas(df: pd.DataFrame) -> pd.DataFrame:
+    """Per-year realized-profit difference (challenger - B1), per scenario, for
+    OURS and MODEL_B -- one row per (scenario, challenger, year).
+
+    Deliberately NO p-values. With n=4 paired years the smallest attainable
+    two-sided p-value of a sign or Wilcoxon signed-rank test is 0.125, so a
+    test can never reject at 5% and a p-value would only invite over-reading;
+    the four deltas themselves are the honest result."""
     rows = []
     for scenario_label, sdf in df.groupby("scenario"):
         realized = sdf.dropna(subset=["realized_profit"])
         b1 = realized[realized["strategy"] == "B1"].set_index("year")["realized_profit"]
         for challenger in ["OURS", "MODEL_B"]:
             chal = realized[realized["strategy"] == challenger].set_index("year")["realized_profit"]
-            years = sorted(set(b1.index) & set(chal.index))
-            if len(years) < 2:
-                continue
-            diffs = (chal.reindex(years) - b1.reindex(years)).to_numpy()
-            n_wins = int((diffs > 0).sum())
-            n = len(diffs)
-            sign_p = stats.binomtest(n_wins, n, 0.5).pvalue if n > 0 else float("nan")
-            try:
-                wil_stat, wil_p = stats.wilcoxon(diffs) if np.any(diffs != 0) else (float("nan"), float("nan"))
-            except ValueError:
-                wil_stat, wil_p = float("nan"), float("nan")
-            rows.append({
-                "scenario": scenario_label, "challenger": challenger, "n_years": n, "n_wins_vs_b1": n_wins,
-                "sign_test_p": sign_p, "wilcoxon_stat": wil_stat, "wilcoxon_p": wil_p,
-                "mean_diff_rs": float(diffs.mean()),
-            })
+            for year in sorted(set(b1.index) & set(chal.index)):
+                rows.append({
+                    "scenario": scenario_label, "challenger": challenger, "year": int(year),
+                    "challenger_profit": float(chal[year]), "b1_profit": float(b1[year]),
+                    "delta_rs": float(chal[year] - b1[year]),
+                    "delta_pct": float((chal[year] - b1[year]) / abs(b1[year]) * 100) if b1[year] else float("nan"),
+                })
     return pd.DataFrame(rows)
 
 
-def write_summary_md(summary_df: pd.DataFrame, stats_df: pd.DataFrame, missing_by_year: dict) -> None:
+def write_summary_md(summary_df: pd.DataFrame, deltas_df: pd.DataFrame, missing_by_year: dict) -> None:
     lines = ["# Decision backtest 2016-2020: summary (Phase 7)\n\n"]
     lines.append(
         "Maharashtra's yield_clean.parquet has no rows at all for year 2020 (any crop) -- verified against the "
         "raw data, not a code bug. Every 'realized' figure below (total/mean/worst realized profit, capture "
-        "ratio, win count, forecast gap, sign/Wilcoxon tests) is therefore computed over **2016-2019 (n=4)**, "
+        "ratio, win count, forecast gap, per-year deltas) is therefore computed over **2016-2019 (n=4)**, "
         "not the full 5 decision years. Planned allocations and water/fert usage ARE reported for 2020 (planning "
         "only needs data <= 2019), just not scored against an outcome that doesn't exist. See "
         "`missing_realized_crops` in backtest_rows.csv and the per-year note below.\n\n"
@@ -266,19 +300,21 @@ def write_summary_md(summary_df: pd.DataFrame, stats_df: pd.DataFrame, missing_b
         "say how big the miss was, not which direction).\n"
     )
 
-    lines.append("\n## Paired tests vs B1 (realized profit), per scenario\n\n")
+    lines.append("\n## Per-year realized-profit delta vs B1 (Rs), per scenario\n\n")
     lines.append(
-        "**n=4 (or fewer) paired years per scenario -- statistical power is essentially nonexistent at this "
-        "sample size. These p-values are exploratory/directional signals only, NOT evidence of a significant "
-        "effect in either direction. Do not read a low p-value here as proof AgriOpt beats B1, or a high one as "
-        "proof it doesn't.**\n\n"
+        "**Four paired years (2016-2019) cannot support a significance test** -- the smallest attainable "
+        "two-sided sign / Wilcoxon p-value at n=4 is 0.125 -- so none is reported. The per-year deltas below "
+        "are the result; read the sign and size of each, not an aggregate.\n\n"
     )
-    scols = ["scenario", "challenger", "n_years", "n_wins_vs_b1", "sign_test_p", "wilcoxon_stat", "wilcoxon_p", "mean_diff_rs"]
-    lines.append("| " + " | ".join(scols) + " |\n")
-    lines.append("|" + "---|" * len(scols) + "\n")
-    for _, row in stats_df.iterrows():
-        cells = [f"{row[c]:.4f}" if isinstance(row[c], float) else str(row[c]) for c in scols]
-        lines.append("| " + " | ".join(cells) + " |\n")
+    years = sorted(deltas_df["year"].unique())
+    lines.append("| scenario | challenger | " + " | ".join(str(y) for y in years) + " | mean | years won |\n")
+    lines.append("|" + "---|" * (len(years) + 4) + "\n")
+    for (scenario_label, challenger), g in deltas_df.groupby(["scenario", "challenger"], sort=False):
+        by_year = g.set_index("year")["delta_rs"]
+        cells = [f"{by_year[y]:+,.0f}" if y in by_year.index else "-" for y in years]
+        lines.append(
+            f"| {scenario_label} | {challenger} | " + " | ".join(cells) + f" | {by_year.mean():+,.0f} | {int((by_year > 0).sum())}/{len(by_year)} |\n"
+        )
 
     (REPORTS_RESULTS / "backtest_summary.md").write_text("".join(lines), encoding="utf-8")
     print("Wrote backtest_summary.md")
@@ -345,7 +381,7 @@ def plot_planned_vs_realized(df: pd.DataFrame) -> None:
     print("Wrote backtest_planned_vs_realized.png")
 
 
-def write_findings(df: pd.DataFrame, summary_df: pd.DataFrame, stats_df: pd.DataFrame, missing_by_year: dict) -> None:
+def write_findings(df: pd.DataFrame, summary_df: pd.DataFrame, deltas_df: pd.DataFrame, missing_by_year: dict) -> None:
     lines = ["# Decision backtest findings (Phase 7)\n\n"]
     lines.append(
         "- **2020 has no realized outcome at all**: Maharashtra's yield_clean.parquet stops at 2019 for every "
@@ -387,10 +423,10 @@ def write_findings(df: pd.DataFrame, summary_df: pd.DataFrame, stats_df: pd.Data
             )
 
     lines.append(
-        "\n**Statistical caveat (stated plainly, not buried)**: every sign-test / Wilcoxon p-value in "
-        "backtest_summary.md is computed on n=4 paired years. Statistical power at n=4 is essentially "
-        "nonexistent -- these are exploratory/directional signals only, not evidence that AgriOpt beats (or "
-        "fails to beat) B1 in any statistically meaningful sense. Do not cite a low p-value here as proof.\n"
+        "\n**Statistical caveat (stated plainly, not buried)**: only four years (2016-2019) have a realized "
+        "outcome. With n=4 no sign or Wilcoxon test can reach p<0.125, so none is reported; "
+        "backtest_summary.md lists the per-year deltas instead. Treat the results as four case studies, not as "
+        "evidence that AgriOpt beats (or fails to beat) B1 in any statistically meaningful sense.\n"
     )
 
     (REPORTS_RESULTS / "backtest_findings.md").write_text("".join(lines), encoding="utf-8")
@@ -416,18 +452,19 @@ def main() -> None:
     summary_df.to_csv(REPORTS_RESULTS / "backtest_summary.csv", index=False)
     print("Wrote backtest_summary.csv")
 
-    stats_df = run_stats(df)
+    deltas_df = paired_deltas(df)
+    deltas_df.to_csv(REPORTS_RESULTS / "backtest_deltas.csv", index=False)
 
-    write_summary_md(summary_df, stats_df, missing_by_year)
+    write_summary_md(summary_df, deltas_df, missing_by_year)
     plot_realized_profit(df)
     plot_capture_ratio(summary_df)
     plot_planned_vs_realized(df)
-    write_findings(df, summary_df, stats_df, missing_by_year)
+    write_findings(df, summary_df, deltas_df, missing_by_year)
 
     print("\n=== summary ===")
     print(summary_df.to_string(index=False))
-    print("\n=== stats ===")
-    print(stats_df.to_string(index=False))
+    print("\n=== per-year deltas vs B1 ===")
+    print(deltas_df.to_string(index=False))
 
 
 if __name__ == "__main__":

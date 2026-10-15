@@ -294,6 +294,7 @@ def build_win_summary(rows_df: pd.DataFrame) -> pd.DataFrame:
                 "win_count_vs_b1_scaled": int(g["win_vs_b1_scaled"].sum()) if g["win_vs_b1_scaled"].notna().any() else None,
                 "mean_capture_ratio_w": float(g["capture_ratio_w"].mean()),
                 "mean_profit_per_1000m3": float(g["profit_per_1000m3"].mean()),
+                "mean_realized_profit": float(g["realized_profit"].mean()),
             }
         )
     # capture_ratio (budget-level, vs ORACLE) + profit-per-water for B1/B1_SCALED/ORACLE too
@@ -306,9 +307,35 @@ def build_win_summary(rows_df: pd.DataFrame) -> pd.DataFrame:
                 "win_count_vs_b1": None, "win_count_vs_b1_scaled": None,
                 "mean_capture_ratio_w": float(g["capture_ratio_w"].mean()),
                 "mean_profit_per_1000m3": float(g["profit_per_1000m3"].mean()),
+                "mean_realized_profit": float(g["realized_profit"].mean()),
             }
         )
     return pd.DataFrame(out).sort_values(["scenario", "strategy"]).reset_index(drop=True)
+
+
+DELTA_BASELINES = ["B1", "B1_SCALED", "B2", "B3"]
+DELTA_CHALLENGERS = ["OURS", "MODEL_B"]
+
+
+def build_deltas(rows_df: pd.DataFrame) -> pd.DataFrame:
+    """Per-year realized-profit difference (challenger - baseline) for OURS and
+    MODEL_B against EVERY baseline (B1, B1_SCALED, B2, B3), per scenario. No
+    p-values: with n=4 paired years the smallest attainable two-sided sign or
+    Wilcoxon p is 0.125, so no test can reject -- the deltas are the result."""
+    realized = rows_df.dropna(subset=["realized_profit"])
+    out = []
+    for scenario, sdf in realized.groupby("scenario"):
+        by = {st: g.set_index("year")["realized_profit"] for st, g in sdf.groupby("strategy")}
+        for challenger in DELTA_CHALLENGERS:
+            for baseline in DELTA_BASELINES:
+                if challenger not in by or baseline not in by:
+                    continue
+                for year in sorted(set(by[challenger].index) & set(by[baseline].index)):
+                    out.append({
+                        "scenario": scenario, "challenger": challenger, "baseline": baseline, "year": int(year),
+                        "delta_rs": float(by[challenger][year] - by[baseline][year]),
+                    })
+    return pd.DataFrame(out)
 
 
 def build_capture_ratio_budget_level(rows_df: pd.DataFrame) -> pd.DataFrame:
@@ -353,7 +380,7 @@ def plot_decomposition_tight(decomp_df: pd.DataFrame) -> None:
     print("Wrote backtest_decomposition_tight_v2.png")
 
 
-def write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_df, decomp_df) -> None:
+def write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_df, decomp_df, deltas_df=None) -> None:
     lines = ["# Decision backtest v2: fairness, water-matched oracle, decomposition (Phase 7.1)\n\n"]
 
     lines.append("## 1. B1 feasibility and B1_SCALED fairness\n\n")
@@ -369,7 +396,7 @@ def write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_d
 
     lines.append("\n## 2. Win counts and capture ratios (2016-2019, n=4)\n\n")
     cols2 = ["scenario", "strategy", "n_years", "win_count_vs_b1", "win_count_vs_b1_scaled",
-             "mean_capture_ratio_w", "mean_profit_per_1000m3"]
+             "mean_realized_profit", "mean_capture_ratio_w", "mean_profit_per_1000m3"]
     lines.append("| " + " | ".join(cols2) + " |\n" + "|" + "---|" * len(cols2) + "\n")
     for _, row in win_summary_df.iterrows():
         cells = [f"{row[c]:,.3f}" if isinstance(row[c], float) else str(row[c]) for c in cols2]
@@ -387,6 +414,23 @@ def write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_d
             f"| {row['year']} | {row['scenario']} | {row['identical_alloc']} | {row['max_abs_diff_ha']:.4f} | "
             f"{row['b2_realized_profit']:,.0f} | {row['oracle_realized_profit']:,.0f} |\n"
         )
+
+    if deltas_df is not None and len(deltas_df):
+        lines.append("\n## 5. Per-year realized-profit delta (Rs): OURS / MODEL_B minus each baseline\n\n")
+        lines.append(
+            "Four paired years cannot support a significance test (smallest attainable two-sided sign or "
+            "Wilcoxon p at n=4 is 0.125), so no p-values are reported; each year's delta is shown.\n\n"
+        )
+        years = sorted(deltas_df["year"].unique())
+        lines.append("| scenario | challenger | vs | " + " | ".join(str(y) for y in years) + " | mean | years won |\n")
+        lines.append("|" + "---|" * (len(years) + 5) + "\n")
+        for (scenario, challenger, baseline), g in deltas_df.groupby(["scenario", "challenger", "baseline"], sort=False):
+            by_year = g.set_index("year")["delta_rs"]
+            cells = [f"{by_year[y]:+,.0f}" if y in by_year.index else "-" for y in years]
+            lines.append(
+                f"| {scenario} | {challenger} | {baseline} | " + " | ".join(cells)
+                + f" | {by_year.mean():+,.0f} | {int((by_year > 0).sum())}/{len(by_year)} |\n"
+            )
 
     (REPORTS_RESULTS / "backtest_summary_v2.md").write_text("".join(lines), encoding="utf-8")
     print("Wrote backtest_summary_v2.md")
@@ -474,7 +518,9 @@ def main() -> None:
 
     win_summary_df = build_win_summary(rows_df)
     capture_budget_df = build_capture_ratio_budget_level(rows_df)
-    write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_df, decomp_df)
+    deltas_df = build_deltas(rows_df)
+    deltas_df.to_csv(REPORTS_RESULTS / "backtest_deltas_v2.csv", index=False)
+    write_summary_md(fairness_df, win_summary_df, capture_budget_df, b2_oracle_df, decomp_df, deltas_df)
     plot_decomposition_tight(decomp_df)
     write_findings_md(fairness_df, win_summary_df, decomp_df, b2_oracle_df)
 
