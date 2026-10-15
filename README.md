@@ -1,5 +1,7 @@
 # AgriOpt
 
+**Report / PPT team: start at [`docs/handoff/00_START_HERE.md`](docs/handoff/00_START_HERE.md).**
+
 [![tests](https://github.com/Dhwanitisshah/agriopt/actions/workflows/tests.yml/badge.svg)](https://github.com/Dhwanitisshah/agriopt/actions/workflows/tests.yml)
 
 **Live demo:** `https://agriopt-bmuud9kclfctcmxrb3abce.streamlit.app`
@@ -89,7 +91,7 @@ ratio vs a perfect-foresight plan using the same water; profit per 1,000 m3 of w
 | ORACLE (perfect foresight) | 339,253 | 1.00 | 3,802 | 295,022 | 1.00 | 4,094 |
 
 Read it honestly: OURS is a **water-saving** plan, not a profit-maximising one -- at default water it ties the
-current mix on profit (+Rs 1,290/yr, 2 of 4 years) while using 37.6% less water (1.7x the profit per m3); at tight
+current mix on profit (+Rs 1,290/yr, 2 of 4 years) while using 38.9% less water (1.7x the profit per m3); at tight
 water it loses to the raw (water-infeasible) current mix by Rs 28,834/yr but beats the water-feasible B1_SCALED by
 Rs 46,190/yr (3 of 4). B2, the plain profit-max LP, beats OURS in every year of both scenarios. Per-year deltas
 (no p-values: four paired years cannot reject at 5%) are in `backtest_summary_v2.md` section 5. Perfect foresight
@@ -243,7 +245,7 @@ theme. See `requirements.txt` for the full dev/training dependency set.
   `docs/water.md`, Phase 8.1 section 3).
 - **Sugarcane's low measured price risk is an FRP artifact**, not genuinely low agronomic risk
   (a fixed administered price has zero month-to-month variance by construction) -- the risk-aware
-  model's sugarcane allocation is sensitive to this assumption (see `reports/results/risk_strategies.md`).
+  model's sugarcane allocation was tested for this: raising sugarcane's risk to a typical crop's level moved its hectares only 9% (2.53 -> 2.30 ha) in the standard test (`reports/results/risk_strategies.md`), but in the app's risk-aware presets it still carries 75-78% of profit (medium and large presets).
 - **Cost margins are mostly set by policy**: cost per quintal is all-India (derived from MSP margins for most
   crops), so jowar, soybean and cotton carry an identical margin by construction. A state-wise
   CACP cost of cultivation (Rs/ha) for Maharashtra is the single most valuable missing input.

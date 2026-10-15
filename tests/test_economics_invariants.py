@@ -112,8 +112,10 @@ def test_cached_recommendations_are_not_sugarcane_dominated():
     was too strict once B1 started using all its land: preset water budgets
     are multiples of B1's water, so they grew, and a profit-maximising plan
     with more water legitimately puts more of the farm into the crop with the
-    highest net profit per ha. The dry-year Marathwada preset sits at ~71% --
-    a known sensitivity, see CHANGELOG_fixes.md.)"""
+    highest net profit per ha. In the standard presets this checks, sugarcane's
+    share is now 3-53% (the Marathwada dry-year preset is ~37%); the experimental
+    risk-aware medium and large presets are higher, 75-78% -- see
+    CHANGELOG_fixes.md.)"""
     raw = appdata.load_cache_raw()
     import importlib.util
     from pathlib import Path
