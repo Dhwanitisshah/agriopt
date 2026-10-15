@@ -380,3 +380,39 @@ section's numbers).
 
 See `reports/results/region_comparison.md` for the full 8-crop x 4-region x
 2-scenario table and the E3 strategies rerun for `marathwada`/`konkan`.
+
+## 9. Economics review (Task 10): monthly balance, a real dry year, equal-budget regions
+
+This section **supersedes the net-irrigation arithmetic of sections 3 and 6** (the rest -- area weighting, rice
+puddling water, `region` -- stands). The old numbers in those sections are kept for the audit trail.
+
+**9.1 Net irrigation is a sum of monthly deficits.** The old form was
+`max(0, season need - sum of the season's monthly effective rain)`. That lets July's surplus pay for September's
+deficit, although rain beyond a month's crop need runs off or drains. Now, over the crop's season-window months
+(section 5, unchanged), `net = sum_m max(0, need_m - Peff_m)`, where `Peff_m` is the USDA-SCS effective rain of
+that month (section 4, unchanged). The FAO TM3 seasonal need has no monthly profile in this repository; it is
+spread **uniformly** over the window's months (**ASSUMPTION**, documented, not data -- no crop-coefficient staging
+is invented). The rice puddling water (`RICE_EXTRA_MM`) is still added on top, for rice only.
+
+**9.2 "Normal" is the average of the yearly balances.** Balancing the 30-year *mean* monthly rainfall hides the
+months that fall short (the deficit is convex in rainfall) and understated irrigation need -- in a first draft it
+even made a real dry year look no thirstier than "normal" for rice. Normal is therefore the mean, over the 30
+observed years, of each year's own monthly balance.
+
+**9.3 "Dry" is a real year, not per-month percentiles.** Taking the 20th percentile of each month independently
+builds a composite year in which every month is simultaneously unusually dry. Now
+`agriopt.data.rainfall.dry_year(region)` is the observed year whose **usable rain** (min(monthly need, monthly
+Peff), summed over the 8 decision crops' season windows) is nearest the 20th percentile of the 30 years, and
+`monthly_dry_year` returns that year's actual monthly values. Usable rain, not the June-September total, because
+under a monthly balance kharif shortfalls sit in the shoulder months (June, October): a year ranked dry by the
+monsoon total can need *less* irrigation than average (state-wide rice: 240 mm vs 266 mm normal in the first
+draft). Summed deficit + summed usable rain = summed need, so ranking by usable rain is exactly the reverse of
+ranking by total irrigation shortfall. Dry years chosen: maharashtra 2003, konkan 2002, madhya_maharashtra 2000,
+marathwada 1986, vidarbha 2014. A single real year can still reverse for an individual crop (rabi wheat/jowar in
+Marathwada and Vidarbha live on winter rain), so tests require dry > normal in total, not per crop.
+
+**9.4 Equal-budget region comparison.** `region_comparison.md` used to compare regions with each region's water
+budget set from its *own* B1 footprint, so a rainier region received a smaller budget and the comparison mixed
+agronomy with the budget granted. `reports/results/region_equal_budget.csv` (and a new section of
+`region_comparison.md`) gives every region the same absolute m3 -- 0.7x and 1.0x of the state-wide normal-year B1
+footprint -- for both the normal and the real dry year.

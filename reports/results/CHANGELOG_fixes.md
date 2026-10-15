@@ -354,3 +354,53 @@ environments (scikit-learn/xgboost versions), which is one more reason not to le
 difference over 60 simulated no-effect panels (40 months x 7 crops) the stacked test rejects at p<0.05 in 45% of them, the panel test in 8% (nominal 5%); a real
 effect is still detected; missing crops are averaged over; identical forecasts return p = 1 (the bootstrap
 initially returned a spurious 0.0002 there -- fixed).
+
+### Task 10 -- water model (M2)
+
+Three changes in `agriopt.data.rainfall` (+ `scripts/71_water_region.py`, `docs/water.md` section 9):
+
+1. **Net irrigation = sum of monthly deficits.** Was `max(0, need - sum of the season's monthly effective
+   rain)`, which let a July surplus pay for a September deficit. Now `sum_m max(0, need_m - Peff_m)` over the
+   season-window months; the FAO TM3 seasonal need is spread *uniformly* over the window (stated assumption --
+   there is no monthly crop-coefficient profile in the repo and none was invented). Rice puddling water is still
+   added for rice only. "Normal" is the mean over the 30 observed years of each year's monthly balance, not the
+   balance of the mean year: the deficit is convex in rainfall, and balancing the smooth mean year understated
+   irrigation need (in a first draft it made a real dry year need *less* water than normal for rice).
+2. **"Dry" is a real year.** Was the 20th percentile of each month independently (a composite where every month
+   is unusually dry at once). Now `dry_year(region)`: the observed year whose usable rain (summed over the 8
+   crops' season windows, min(monthly need, Peff)) is nearest the 20th percentile; `monthly_dry_year` returns that
+   year's own months. (The June-September total is a poor selector under a monthly balance -- see docs/water.md
+   9.3.) Chosen years: maharashtra 2003, konkan 2002, madhya_maharashtra 2000, marathwada 1986, vidarbha 2014.
+3. **Regions compared at equal water budgets.** `region_equal_budget.csv` and a new section of
+   `region_comparison.md` give every region the same absolute m3 (0.7x / 1.0x of the state-wide normal-year B1
+   footprint), normal and dry.
+
+State-wide net irrigation, mm (before -> after): normal -- rice 200 -> 266, wheat 514 -> 516, soybean 0 -> 66,
+cotton 324 -> 433, sugarcane 1,293 -> 1,318, tur 0 -> 136, maize 0 -> 91; dry -- rice 212 -> 289, soybean 12 -> 89,
+cotton 435 -> 480, tur 0 -> 163, maize 87 -> 119, sugarcane 1,427 -> 1,372. The monthly balance raises the water
+cost of the monsoon crops the old form called free ("0 mm" for soybean, tur and maize was an artefact of
+averaging a wet July over the season). The old composite dry year overstated the thirst of most crops in
+Marathwada: rice 422 -> 367, cotton 646 -> 561, sugarcane 1,641 -> 1,541 (tur 46 -> 162 goes the other way).
+
+Effect on the five cached presets (the app default basis is net irrigation; budgets are multiples of B1's water):
+
+| preset | water budget m3 | OURS profit | OURS vs B1 |
+|---|---|---|---|
+| small rainfed | 6,414 -> 7,634 | 39,335 -> 39,271 | +8% -> +7% |
+| medium mixed | 22,906 -> 27,266 | 127,043 -> 122,910 | +39% -> +34% |
+| large irrigated | 89,332 -> 106,337 | 457,123 -> 469,955 | +67% -> +71% |
+| drought year | 27,487 -> 32,719 | 178,063 -> 174,312 | -3% -> -5% |
+| Marathwada dry year | 36,105 -> 32,654 | 133,821 -> 122,855 | +46% -> +34% |
+
+**A conclusion flips.** Under per-region budgets (each region's budget from its *own* B1 footprint), Marathwada
+looked 26% better than Konkan (OURS Rs 210,216 vs 166,956 in Phase 1) -- partly because the rainier region was
+handed a smaller budget. At the same absolute budget (normal rainfall, 1.0x = 54,532 m3) OURS earns
+Konkan Rs 273,010 > Maharashtra 258,265 > Madhya 244,796 > Vidarbha 239,686 > Marathwada 224,101, i.e. Konkan is
+22% ahead of Marathwada; at the tight budget Marathwada and Vidarbha fall to -1.5% / -1.8% vs the current mix, and
+in a dry year at the tight budget Marathwada to -11.2%. (The own-budget table, regenerated under the new water model, now has
+Marathwada at 248,237 vs Konkan 253,235.) Tests: `tests/test_water_monthly.py` (synthetic cases showing a surplus
+month does not cover a later deficit, normal = mean of yearly balances, rain used <= monthly need; dry year is an
+observed year near the 20th percentile; dry needs more irrigation than normal in total in every region);
+`test_water_region.py` expectations that encoded the old model (dry >= normal per crop; rice == puddling water at
+normal) are updated, with the reason in each docstring: rabi crops can need slightly less in a year with good
+winter rain (Marathwada wheat 508 vs state-wide normal 516).

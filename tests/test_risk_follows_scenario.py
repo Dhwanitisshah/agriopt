@@ -2,17 +2,12 @@
 dev_cov * outer(R, R) is re-scaled from the ACTIVE params_df (price mode,
 what-if price shocks, FRP override), not the cache's market-price R. Data-free:
 uses only the committed cache."""
-import importlib.util
-from pathlib import Path
-
 import numpy as np
 import pytest
 
 import app.data as appdata
 from app.pipeline import apply_price_shocks
 from app.presets import PRESETS
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture(scope="module")
@@ -68,11 +63,11 @@ def test_msp_floor_price_mode_gets_its_own_sigma(raw, market):
 def test_cached_preset_risk_matches_request_time_sigma(raw):
     """The presets are precomputed offline; the profit risk stored with them must
     equal what the app would compute live for the same inputs."""
-    spec = importlib.util.spec_from_file_location("bc", REPO_ROOT / "scripts" / "40_build_cache.py")
-    bc = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(bc)
     for name, preset in PRESETS.items():
-        params_df = bc._params_df_for_preset(raw["params"], preset, "market")
+        params_df = appdata.params_df_for(
+            raw, preset.get("region", "maharashtra"), preset.get("water_basis", "net_irrigation"),
+            preset.get("rainfall_scenario", "normal"), "market",
+        )
         ri = appdata.risk_inputs_for_params(raw, params_df, sugarcane_mode="conservative")
         cached = raw["preset_results"][name]["normal"]
         assert cached["feasible"], name

@@ -22,6 +22,22 @@ write-up, citations, and ASSUMPTIONs):
     preparation/saturation water, applied ONLY inside net_irrigation_mm (not
     to water_mm()/the "total_need" basis).
 
+Economics-review revision (Task 10):
+  - NET IRRIGATION IS A MONTHLY BALANCE. It used to be max(0, season need -
+    sum of the season's monthly effective rain), which lets a July surplus
+    "cover" a September deficit. Rain that exceeds a month's crop need runs
+    off or drains; it cannot be spent later. Net irrigation is now the sum
+    over the season's months of max(0, monthly need - monthly effective
+    rain). The FAO TM3 seasonal need has no monthly profile in this repo, so it
+    is spread UNIFORMLY over the season window's months (an ASSUMPTION; no
+    crop-coefficient staging data is invented).
+  - THE "DRY" SCENARIO IS A REAL YEAR. It used to take the 20th percentile of
+    each month independently, a composite in which every month is
+    simultaneously unusually dry -- drier than almost any real year. It is now
+    the observed year whose usable rain (summed over the 8 decision crops'
+    season windows) is nearest the 20th percentile of the 30 years, with that
+    year's own monthly values.
+
 See docs/water.md for the full write-up (methodology, citations, all
 ASSUMPTIONs) -- this module is deliberately thin, following the same
 loader-then-pure-function pattern as agriopt.data.reference.
@@ -191,14 +207,54 @@ def monthly_normals(region: str = "maharashtra", n_years: int = N_RECENT_YEARS) 
     return yearly.mean(axis=0)
 
 
+DRY_YEAR_QUANTILE = 0.20
+
+
+def usable_rain_by_year(region: str = "maharashtra", n_years: int = N_RECENT_YEARS) -> pd.Series:
+    """Per observed year, the effective rain the 8 decision crops could actually
+    use, summed over crops: per crop and season month, min(monthly need, that
+    month's effective rain). Uses each crop's own season window and the uniform
+    monthly-need assumption of net_irrigation_mm. Because summed deficit + summed
+    usable rain = summed need (a constant), ranking years by usable rain is
+    exactly the reverse of ranking them by total irrigation shortfall."""
+    ref = load_reference()
+    yearly = _yearly_effective_rainfall(region, n_years)
+    total = pd.Series(0.0, index=yearly.index)
+    for crop, window_key in CROP_SEASON_WINDOW.items():
+        months = SEASON_WINDOW_MONTHS[window_key]
+        need_month = water_mm(crop, ref) / len(months)
+        total = total + np.minimum(need_month, yearly[months]).sum(axis=1)
+    return total
+
+
+@lru_cache(maxsize=None)
+def dry_year(region: str = "maharashtra", n_years: int = N_RECENT_YEARS) -> int:
+    """The observed year that stands for a "dry" year in `region`: of the most
+    recent `n_years` years, the one whose usable rain (see usable_rain_by_year)
+    is nearest the 20th percentile. A REAL year, so its months are mutually
+    consistent (a poor July is not paired with a 20th-percentile September),
+    unlike the per-month percentile composite this replaces.
+
+    Why usable rain and not the June-September total: under a monthly balance
+    the shortfall of kharif crops sits in the shoulder months (June, October),
+    so the monsoon total is a poor guide to which year is thirsty -- a year
+    ranked dry on the JJAS total can need LESS irrigation than the average
+    year."""
+    usable = usable_rain_by_year(region, n_years)
+    target = float(usable.quantile(DRY_YEAR_QUANTILE))
+    return int((usable - target).abs().idxmin())
+
+
 @lru_cache(maxsize=None)
 def monthly_dry_year(region: str = "maharashtra", n_years: int = N_RECENT_YEARS) -> pd.Series:
-    """Monthly rainfall at the 20th percentile across years (a
-    drought-scenario proxy) for `region` (REGIONS), over the same
-    most-recent `n_years` years, index=MONTH_COLS."""
+    """Monthly rainfall (mm) of the real "dry" year (see dry_year) for `region`
+    (REGIONS), index=MONTH_COLS."""
     df = load_rainfall_raw()
     yearly = _regional_yearly(df, region, n_years)
-    return yearly.quantile(0.20, axis=0)
+    year = dry_year(region, n_years)
+    out = yearly.loc[year].copy()
+    out.name = year
+    return out
 
 
 def effective_rainfall_mm(p_mm: float | np.ndarray) -> float | np.ndarray:
@@ -226,11 +282,49 @@ def effective_rainfall_monthly(scenario: str = "normal", region: str = "maharash
 
 def season_effective_rainfall_mm(crop: str, scenario: str = "normal", region: str = "maharashtra") -> float:
     """Sum of effective rainfall (mm) over `crop`'s season window months
-    (see CROP_SEASON_WINDOW), for the given rainfall scenario and region."""
+    (see CROP_SEASON_WINDOW), for the given rainfall scenario and region. This
+    is the rain that FALLS and counts as effective -- not necessarily the rain
+    the crop can use (see season_rain_used_mm)."""
     peff = effective_rainfall_monthly(scenario, region)
     window_key = CROP_SEASON_WINDOW[crop]
     months = SEASON_WINDOW_MONTHS[window_key]
     return float(peff.loc[months].sum())
+
+
+@lru_cache(maxsize=None)
+def _yearly_effective_rainfall(region: str, n_years: int = N_RECENT_YEARS) -> pd.DataFrame:
+    """Effective rainfall (mm), year x month, from each observed year's own monthly rain."""
+    yearly = _regional_yearly(load_rainfall_raw(), region, n_years)
+    return pd.DataFrame(effective_rainfall_mm(yearly.to_numpy(dtype=float)), index=yearly.index, columns=yearly.columns)
+
+
+def _monthly_balance(crop: str, scenario: str, ref: pd.DataFrame, region: str) -> tuple[float, float]:
+    """(total deficit, total effective rain actually used) over the season, in mm.
+
+    The FAO TM3 seasonal need is spread uniformly over the window's months;
+    each month's deficit is max(0, need_m - Peff_m) and the rain used is
+    min(need_m, Peff_m). A surplus in one month is lost, not carried forward.
+
+    scenario="dry": the balance of the one real dry year (see dry_year).
+    scenario="normal": the AVERAGE of the balance over the 30 observed years.
+    Averaging the yearly balances, rather than balancing the 30-year monthly
+    mean rainfall, matters: the deficit is convex in rainfall, so the smooth
+    mean year hides the months that fall short and would understate irrigation
+    need (and could even make a real dry year look no thirstier than normal)."""
+    months = SEASON_WINDOW_MONTHS[CROP_SEASON_WINDOW[crop]]
+    need_month = water_mm(crop, ref) / len(months)
+    yearly = _yearly_effective_rainfall(region)
+    peff = yearly.loc[[dry_year(region)], months] if scenario == "dry" else yearly[months]
+    peff = peff.to_numpy(dtype=float)
+    deficit = np.maximum(need_month - peff, 0.0).sum(axis=1).mean()
+    used = np.minimum(need_month, peff).sum(axis=1).mean()
+    return float(deficit), float(used)
+
+
+def season_rain_used_mm(crop: str, scenario: str = "normal", ref: pd.DataFrame | None = None, region: str = "maharashtra") -> float:
+    """Effective rainfall (mm) the crop can actually use under the monthly
+    balance: per month, at most that month's share of the seasonal need."""
+    return _monthly_balance(crop, scenario, load_reference() if ref is None else ref, region)[1]
 
 
 def net_irrigation_mm(
@@ -239,12 +333,18 @@ def net_irrigation_mm(
     ref: pd.DataFrame | None = None,
     region: str = "maharashtra",
 ) -> float:
-    """Net irrigation requirement (mm) = max(0, water_need_mm - Peff_season_mm),
-    where water_need_mm is the FAO TM3 total crop water need midpoint
-    (agriopt.data.reference.water_mm) and Peff_season_mm is the sum of
-    effective rainfall over the crop's season window (normal or dry-year
-    monthly values, per `scenario`), computed for `region`'s (REGIONS) own
-    rainfall (default "maharashtra", the area-weighted state-wide figure).
+    """Net irrigation requirement (mm) = sum over the crop's season months of
+    max(0, monthly_need - monthly_effective_rain), where monthly_need is the
+    FAO TM3 total crop water need midpoint (agriopt.data.reference.water_mm)
+    spread uniformly over the season window (ASSUMPTION -- no crop-coefficient
+    profile is available), and effective rain is that month's USDA-SCS
+    effective rainfall in `region` for `scenario` ("normal" = 30-year monthly
+    mean, applied year by year and averaged; "dry" = the real year nearest the
+    20th percentile of monsoon rainfall, see dry_year).
+
+    Why a monthly balance: the earlier season-level form,
+    max(0, need - sum of monthly Peff), let a July surplus cover a September
+    deficit. Rain beyond a month's need runs off or drains, so it cannot.
 
     Phase 8.1c: for crop="rice" only, adds RICE_EXTRA_MM -- the FAO-cited
     puddled-rice land-preparation/saturation water requirement, which
@@ -255,9 +355,7 @@ def net_irrigation_mm(
     net_irrigation_mm's own return value."""
     if ref is None:
         ref = load_reference()
-    need = water_mm(crop, ref)
-    peff_season = season_effective_rainfall_mm(crop, scenario, region)
-    net = max(0.0, need - peff_season)
+    net, _ = _monthly_balance(crop, scenario, ref, region)
     if crop == "rice":
         net += RICE_EXTRA_MM
     return net
@@ -266,9 +364,10 @@ def net_irrigation_mm(
 def rainfall_water_table(
     crops: list[str], ref: pd.DataFrame | None = None, region: str = "maharashtra"
 ) -> pd.DataFrame:
-    """crop, water need (mm), Peff normal (mm), net irrigation normal (mm),
-    net irrigation dry (mm) -- the Phase 8 step-1 summary table, for `region`
-    (REGIONS; default "maharashtra")."""
+    """crop, water need (mm), Peff normal (mm), rain actually usable under the
+    monthly balance (mm), net irrigation normal (mm), net irrigation dry (mm)
+    -- the Phase 8 step-1 summary table, for `region` (REGIONS; default
+    "maharashtra")."""
     if ref is None:
         ref = load_reference()
     rows = []
@@ -282,6 +381,7 @@ def rainfall_water_table(
                 "crop": crop,
                 "water_need_mm": need,
                 "peff_normal_mm": peff_normal,
+                "rain_used_normal_mm": season_rain_used_mm(crop, "normal", ref, region),
                 "net_irrigation_normal_mm": net_normal,
                 "net_irrigation_dry_mm": net_dry,
             }

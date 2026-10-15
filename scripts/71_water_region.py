@@ -18,6 +18,14 @@ for comparison:
   reports/results/optim_strategies_marathwada.csv / .md -- E3 table, region=marathwada
   reports/results/optim_strategies_konkan.csv / .md     -- E3 table, region=konkan
   reports/results/region_comparison.md                  -- narrative comparison doc
+  reports/results/region_equal_budget.csv               -- all 5 regions at the SAME absolute water budget
+
+Equal-budget comparison (economics review, Task 10): the per-region E3 tables above derive
+each region's water budget from that region's own B1 water footprint, so a region with more
+rain gets a smaller budget and the comparison mixes "what the region's agronomy allows" with
+"how much water we granted it". region_equal_budget.csv fixes the budget at the state-wide B1
+footprint (x 0.7 / x 1.0) for every region and for both the normal and the real dry year, so
+the only thing that differs is the region's rainfall.
 """
 from __future__ import annotations
 
@@ -29,7 +37,7 @@ import numpy as np
 import pandas as pd
 
 from agriopt.config import CROPS, REPORTS_RESULTS
-from agriopt.data.rainfall import REGIONS, rainfall_water_table
+from agriopt.data.rainfall import REGIONS, dry_year, rainfall_water_table
 from agriopt.optim.baselines import current_mix
 from agriopt.optim.params import build_crop_params
 from agriopt.optim.problem import Scenario
@@ -60,24 +68,27 @@ def write_net_irrigation_by_region() -> pd.DataFrame:
         frames.append(wt)
     combined = pd.concat(frames, ignore_index=True)
     combined = combined[
-        ["region", "crop", "water_need_mm", "peff_normal_mm", "net_irrigation_normal_mm", "net_irrigation_dry_mm"]
+        ["region", "crop", "water_need_mm", "peff_normal_mm", "rain_used_normal_mm", "net_irrigation_normal_mm", "net_irrigation_dry_mm"]
     ]
     combined.to_csv(REPORTS_RESULTS / "net_irrigation_by_region.csv", index=False)
 
     lines = ["# Net irrigation requirement by region (Phase 8.1)\n\n"]
     lines.append(
         "8 crops x 4 IMD subdivisions (+ the area-weighted state-wide \"maharashtra\" "
-        "figure) x 2 rainfall scenarios (normal 30-yr mean, dry 20th-percentile year). "
+        "figure) x 2 rainfall scenarios (normal = the 30-year average of each year's monthly water balance; dry = the real "
+        "observed year nearest the 20th percentile of usable rain, listed per region below). Net irrigation is the SUM OF "
+        "MONTHLY DEFICITS over the crop's season (a surplus month does not cover a later deficit); `Peff normal` is the "
+        "season's total effective rain, `rain used` the part the crop can actually use. "
         "See docs/water.md section 8 for methodology and citations.\n\n"
     )
     for region in REGIONS:
         sub = combined[combined["region"] == region].round(1)
-        lines.append(f"## region={region}\n\n")
-        lines.append("| crop | water need (mm) | Peff normal (mm) | net irrigation normal (mm) | net irrigation dry (mm) |\n")
-        lines.append("|---|---|---|---|---|\n")
+        lines.append(f"## region={region} (dry year = {dry_year(region)})\n\n")
+        lines.append("| crop | water need (mm) | Peff normal (mm) | rain used (mm) | net irrigation normal (mm) | net irrigation dry (mm) |\n")
+        lines.append("|---|---|---|---|---|---|\n")
         for _, row in sub.iterrows():
             lines.append(
-                f"| {row['crop']} | {row['water_need_mm']} | {row['peff_normal_mm']} | "
+                f"| {row['crop']} | {row['water_need_mm']} | {row['peff_normal_mm']} | {row['rain_used_normal_mm']} | "
                 f"{row['net_irrigation_normal_mm']} | {row['net_irrigation_dry_mm']} |\n"
             )
         lines.append("\n")
@@ -118,7 +129,61 @@ def write_optim_strategies_region(m30, region: str, x1: np.ndarray, params_by_mo
     return strategy_df
 
 
-def write_region_comparison(strategy_by_region: dict[str, pd.DataFrame], net_table: pd.DataFrame) -> None:
+def run_equal_budget(m30) -> pd.DataFrame:
+    """Every region x rainfall scenario (normal / real dry year) x water level
+    (tight 0.7x / current 1.0x of the STATE-WIDE normal-year B1 footprint), market
+    prices: the same absolute m3 for everyone."""
+    x1, state_b1_water, _ = compute_b1_water_region("maharashtra")
+    rows = []
+    for rainfall in ("normal", "dry"):
+        for region in REGIONS:
+            params = build_crop_params("market", verbose=False, water_basis=WATER_BASIS, rainfall_scenario=rainfall, region=region)
+            for label, mult in WATER_MULTIPLIERS.items():
+                budget = mult * state_b1_water
+                run = m30.run_scenario(label, "market", x1, params, budget)
+                for strategy in ["B1", "B2", "B3", "OURS"]:
+                    r = run["eval"][strategy]
+                    if r is None:
+                        rows.append({"rainfall": rainfall, "region": region, "water_scenario": label, "budget_m3": budget,
+                                     "strategy": strategy, "feasible": False})
+                        continue
+                    rows.append({
+                        "rainfall": rainfall, "region": region, "water_scenario": label, "budget_m3": budget,
+                        "strategy": strategy, "profit": r["profit"], "water_m3": r["water_m3"], "fert_kg": r["fert_kg"],
+                        "n_crops": r["n_crops"], "feasible": r["feasible"],
+                    })
+    df = pd.DataFrame(rows)
+    df.to_csv(REPORTS_RESULTS / "region_equal_budget.csv", index=False)
+    print("Wrote region_equal_budget.csv")
+    return df
+
+
+def equal_budget_markdown(df: pd.DataFrame) -> str:
+    lines = ["\n## Equal water budget: the same absolute m3 in every region\n\n"]
+    lines.append(
+        "Budget = 0.7x / 1.0x of the STATE-WIDE normal-year B1 net-irrigation footprint, identical for every region "
+        "(unlike the per-region tables above, whose budgets shrink where rain is plentiful). Market prices. "
+        "`dry` = the real observed year nearest the region's 20th percentile of usable rain "
+        "(agriopt.data.rainfall.dry_year). B1's hectares are the same everywhere, so any B1 change is the region's rain.\n\n"
+    )
+    for rainfall in ("normal", "dry"):
+        for label in ("current", "tight"):
+            sub = df[(df.rainfall == rainfall) & (df.water_scenario == label)]
+            budget = sub["budget_m3"].iloc[0]
+            lines.append(f"### rainfall={rainfall}, water={label} ({budget:,.0f} m3 everywhere)\n\n")
+            lines.append("| region | B1 profit | B1 water | B2 profit | OURS profit | OURS water | OURS vs B1 | B1 feasible |\n|---|---|---|---|---|---|---|---|\n")
+            for region in REGIONS:
+                g = sub[sub.region == region].set_index("strategy")
+                b1, b2, ours = g.loc["B1"], g.loc["B2"], g.loc["OURS"]
+                lines.append(
+                    f"| {region} | {b1['profit']:,.0f} | {b1['water_m3']:,.0f} | {b2['profit']:,.0f} | {ours['profit']:,.0f} | "
+                    f"{ours['water_m3']:,.0f} | {(ours['profit'] / b1['profit'] - 1) * 100:+.1f}% | {bool(b1['feasible'])} |\n"
+                )
+            lines.append("\n")
+    return "".join(lines)
+
+
+def write_region_comparison(strategy_by_region: dict[str, pd.DataFrame], net_table: pd.DataFrame, equal_df: pd.DataFrame | None = None) -> None:
     orig_net_path = REPORTS_RESULTS / "optim_strategies_net.csv"
     orig_net_df = pd.read_csv(orig_net_path) if orig_net_path.exists() else None
 
@@ -174,6 +239,9 @@ def write_region_comparison(strategy_by_region: dict[str, pd.DataFrame], net_tab
             if not r.empty:
                 r = r.iloc[0]
                 lines.append(f"| {region} | {strategy} | {r['profit']:.0f} | {r['water_m3']:.0f} |\n")
+
+    if equal_df is not None:
+        lines.append(equal_budget_markdown(equal_df))
 
     lines.append("\n## Findings\n\n")
     mw_rice = pivot.loc["rice", "marathwada"] if "rice" in pivot.index and "marathwada" in pivot.columns else None
@@ -241,8 +309,11 @@ def main() -> None:
         }
         strategy_by_region[region] = write_optim_strategies_region(m30, region, x1, params_by_mode, water_budgets)
 
+    print("\n-- equal-budget comparison (all regions, same absolute water) --")
+    equal_df = run_equal_budget(m30)
+
     print("\n-- region_comparison.md --")
-    write_region_comparison(strategy_by_region, net_table)
+    write_region_comparison(strategy_by_region, net_table, equal_df)
 
 
 if __name__ == "__main__":
