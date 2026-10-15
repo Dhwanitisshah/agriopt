@@ -263,8 +263,15 @@ def main() -> None:
     results_df.to_csv(REPORTS_RESULTS / "yield_results.csv")
 
     lower_better = {c for c in results_df.columns if c.endswith(("_MAE", "_RMSE", "_MAPE"))}
-    higher_better = {c for c in results_df.columns if c.endswith("_R2")}
-    md = ["# Yield model results (E1.1)\n\n", markdown_table_bold_best(results_df, lower_better, higher_better)]
+    # The pooled R2 columns stay in the csv (audit trail) but are not shown: pooled over crops in
+    # different units they mostly measure scale -- see scripts/95_yield_decision_crops.py.
+    shown_df = results_df[[c for c in results_df.columns if not c.endswith("_R2")]]
+    md = [
+        "# Yield model results (E1.1)\n\n",
+        "> Pooled columns (`all_india_*`, `maharashtra_*`) mix crops in different units, so they mostly rank crops by "
+        "magnitude; the pooled R^2 has been dropped. Use `yield_decision_crops.md` for the 8 crops the optimizer allocates.\n\n",
+        markdown_table_bold_best(shown_df, lower_better, set()),
+    ]
     (REPORTS_RESULTS / "yield_results.md").write_text("".join(md), encoding="utf-8")
     print("Wrote yield_results.csv / yield_results.md")
 
@@ -489,8 +496,7 @@ def write_findings(
         )
     lines.append(
         f"- Test-set metrics reported below are for **{best_overall_name}** "
-        f"({STATE} test MAE={results_df.loc[best_overall_name, 'maharashtra_MAE']:.3f}, "
-        f"R2={results_df.loc[best_overall_name, 'maharashtra_R2']:.3f}; all-India test MAE="
+        f"(pooled {STATE} test MAE={results_df.loc[best_overall_name, 'maharashtra_MAE']:.3f}, in mixed units; all-India test MAE="
         f"{results_df.loc[best_overall_name, 'all_india_MAE']:.3f}) -- computed purely for reporting, "
         "played no role in selecting it.\n"
     )
@@ -499,10 +505,7 @@ def write_findings(
             f"- All-India test MAE would have picked a different model ({all_india_winner}) than "
             f"{STATE} MAE ({best_overall_name}) -- all-India MAE is dominated by scale effects from "
             "huge-magnitude, non-target crops (e.g. Coconut yield up to ~5000 t/ha), so a model can win "
-            "on that metric while doing poorly for our actual crops/region. Case in point: "
-            f"{all_india_winner}'s {STATE} R2 is {results_df.loc[all_india_winner, 'maharashtra_R2']:.3f} "
-            f"(worse than predicting the mean, if negative), vs {best_overall_name}'s "
-            f"{results_df.loc[best_overall_name, 'maharashtra_R2']:.3f}.\n"
+            "on that metric while doing poorly for our actual crops/region.\n"
         )
     lines.append(
         f"- {'A baseline (Baseline-Mean/Baseline-Last) beats every ML model on ' + STATE + ' MAE' if baseline_beats_ml_mh else 'Every ML model (Ridge/RandomForest/XGBoost) beats both baselines on ' + STATE + ' MAE'} "

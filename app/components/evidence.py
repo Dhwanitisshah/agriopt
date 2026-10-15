@@ -1,6 +1,7 @@
 """Tab 4: Model inputs & evidence -- per-crop params, model metrics, SHAP, sources."""
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 
@@ -11,6 +12,7 @@ RISK_HEATMAP_IMAGE = REPO_ROOT / "reports" / "results" / "risk_correlation_heatm
 ABLATION_CSV = REPO_ROOT / "reports" / "results" / "ablation_decisions.csv"
 FRONT_QUALITY_V2_CSV = REPO_ROOT / "reports" / "results" / "optim_front_quality_v2.csv"
 RESULTS_INDEX_MD = REPO_ROOT / "reports" / "results" / "RESULTS_INDEX.md"
+YIELD_DECISION_CSV = REPO_ROOT / "reports" / "results" / "yield_decision_crops_verdicts.csv"
 
 
 def _parse_results_index_table(md_text: str) -> pd.DataFrame | None:
@@ -80,12 +82,32 @@ def render_evidence_tab(params_df: pd.DataFrame, yield_meta: dict, price_meta: d
     st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
 
     st.subheader("Yield model")
-    m = yield_meta["metrics_maharashtra"]
     st.markdown(
-        f"**{yield_meta['model_name']}**, trained on years {yield_meta['train_years']} — "
-        f"Maharashtra validation/test metrics: MAE={m['MAE']:.3f} qtl/ha, RMSE={m['RMSE']:.3f}, "
-        f"R²={m['R2']:.3f}, MAPE={m['MAPE']:.1f}%."
+        f"**{yield_meta['model_name']}**, trained on years {yield_meta['train_years']}. Judged on the 8 crops the "
+        "optimizer allocates -- not a pooled figure, which mixes tonnes, bales and milled-rice equivalents and mostly "
+        "ranks crops by magnitude."
     )
+    if YIELD_DECISION_CSV.exists():
+        vdf = pd.read_csv(YIELD_DECISION_CSV)
+        vdf = vdf[vdf["design"].str.startswith("one-step-ahead")]
+        show = pd.DataFrame(
+            {
+                "crop": vdf["crop"],
+                "RF MAPE %": vdf["rf_MAPE"].round(1),
+                "last-3-yr mean MAPE %": vdf["last3_MAPE"].round(1),
+                "RF MAE (qtl/ha)": vdf["rf_MAE"].round(2),
+                "last-3-yr MAE (qtl/ha)": vdf["last3_MAE"].round(2),
+                "RF beats last-3-yr mean?": np.where(vdf["rf_loses_to_last3"], "NO", "yes"),
+            }
+        )
+        st.dataframe(show, hide_index=True, width="stretch")
+        losers = ", ".join(vdf.loc[vdf["rf_loses_to_last3"], "crop"]) or "none"
+        st.caption(
+            f"One-step-ahead, 2016-2019 (n=4 per crop -- directional). The RandomForest does not beat a last-3-year "
+            f"state mean for: {losers}. See reports/results/yield_decision_crops.md."
+        )
+    else:
+        st.caption(f"{YIELD_DECISION_CSV.name} not found -- run scripts/95_yield_decision_crops.py.")
     st.caption(yield_meta.get("note", ""))
 
     st.subheader("Price model")

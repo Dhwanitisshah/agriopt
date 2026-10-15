@@ -293,3 +293,38 @@ writes `backtest_deltas_v2.csv` (OURS / MODEL_B minus B1, B1_SCALED, B2 and B3, 
 section 5 table in `backtest_summary_v2.md`. The README backtest row will list all of them. The app's Backtest tab
 caption claimed "B2 and ORACLE are identical in every year/scenario" (false even before this change); it now
 describes the real situation.
+
+### Task 8 -- yield model honesty (M1)
+
+The headline yield table pooled every Maharashtra crop in its native unit (t/ha, bales/ha, milled-rice
+equivalent), so pooled MAE / R^2 mostly ranked crops by magnitude. New `scripts/95_yield_decision_crops.py`
+(does not retrain; uses the saved models) reports only the 8 decision crops, in the optimizer's saleable qtl/ha,
+against a new `BaselineRecentMean` (mean of the last 3 years of the same state/crop/season), plus last-year and
+all-years baselines. Two designs, both on 2016-2019 (n=4 per crop): **one-step-ahead** (RF refit each year on
+<= t-1, as the optimizer uses it; primary) and fixed origin (the <= 2015 model, up to 4 years ahead).
+
+| crop | RF MAPE % | last-3-yr mean MAPE % | RF vs last-3-yr (MAE) | one-step-ahead |
+|---|---|---|---|---|
+| rice | 14.8 | 17.3 | +15% | RF wins |
+| wheat | 8.6 | 11.3 | +26% | RF wins |
+| soybean | 9.1 | 18.6 | +51% | RF wins |
+| jowar | 26.9 | 21.3 | -20% | **RF loses** |
+| cotton | 28.0 | 25.8 | -7% | **RF loses** |
+| tur | 33.7 | 30.9 | -7% | **RF loses** |
+| maize | 31.4 | 30.9 | -6% | **RF loses** |
+| sugarcane | 3.0 | 1.5 | -96% | **RF loses** |
+
+RF beats the last-3-year mean on 3/8 crops and loses on 5/8; against the *best* of the three naive baselines it
+loses on 7/8 (all but wheat; the all-years mean often wins). Mean MAPE 19.4% (RF) vs 19.7% (last-3-yr). Fixed
+origin: RF loses to the last-3-year mean on 4/8 (rice, jowar, sugarcane, maize), mean MAPE 19.1% vs 22.9%.
+
+Claim that gets weaker: "RandomForest wins" (RESULTS_INDEX E1.1) rested on the pooled Maharashtra MAE
+(0.506 vs 0.667 for Baseline-Mean) and R^2 = 0.938. Both are dropped from the README/index/app/`yield_results.md`
+(the pooled R^2 columns stay in `yield_results.csv` as an audit trail; `10_train_yield.py` now omits them from its
+markdown). The Wilcoxon "RF beats XGBoost" row is annotated: its 152 paired errors pool crops in native units.
+Combined with Task 7 (perfect yield foresight would close ~2/3 of the gap to the perfect-foresight plan), the
+yield forecast is the weak, high-value link. This is a finding to act on (e.g. shrink the RF toward a recent mean
+for the crops where it loses), not something I changed in the optimizer. The app's Evidence tab now shows this
+decision-crop table instead of the pooled MAE/R^2 line. Tests: baseline unit test, committed-table consistency
+(flags match MAEs), no `_R2` in the committed markdown.
+

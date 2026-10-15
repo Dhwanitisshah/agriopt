@@ -240,6 +240,40 @@ class BaselineLast:
         return pred.to_numpy()
 
 
+class BaselineRecentMean:
+    """Mean yield of the same (state, crop, season) over its `n_years` most
+    recent training years (default 3); coarser fallback groups use the same
+    rule over their own most recent years. This is the "what a state officer
+    would guess" baseline the ML model has to beat: unlike BaselineMean it
+    follows the trend, unlike BaselineLast it is not at the mercy of one
+    freak year."""
+
+    def __init__(self, n_years: int = 3):
+        self.n_years = n_years
+        self.name = f"Baseline-Last{n_years}Mean"
+
+    def _recent_mean(self, df: pd.DataFrame, group_cols: list[str], col: str) -> pd.DataFrame:
+        per_year = df.groupby(group_cols + ["year"])["yield"].mean().reset_index()
+        per_year["_rank"] = per_year.groupby(group_cols)["year"].rank(method="first", ascending=False)
+        recent = per_year[per_year["_rank"] <= self.n_years]
+        return recent.groupby(group_cols)["yield"].mean().reset_index().rename(columns={"yield": col})
+
+    def fit(self, train_df: pd.DataFrame) -> "BaselineRecentMean":
+        self._g3 = self._recent_mean(train_df, ["state", "crop", "season"], "pred3")
+        self._g2 = self._recent_mean(train_df, ["crop", "season"], "pred2")
+        self._g1 = self._recent_mean(train_df, ["crop"], "pred1")
+        last_years = sorted(train_df["year"].unique())[-self.n_years :]
+        self._global = float(train_df.loc[train_df["year"].isin(last_years), "yield"].mean())
+        return self
+
+    def predict(self, df: pd.DataFrame) -> np.ndarray:
+        out = df[["state", "crop", "season"]].merge(self._g3, on=["state", "crop", "season"], how="left")
+        out = out.merge(self._g2, on=["crop", "season"], how="left")
+        out = out.merge(self._g1, on=["crop"], how="left")
+        pred = out["pred3"].fillna(out["pred2"]).fillna(out["pred1"]).fillna(self._global)
+        return pred.to_numpy()
+
+
 # --- ML models ---------------------------------------------------------------
 
 
