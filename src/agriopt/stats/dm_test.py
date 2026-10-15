@@ -23,6 +23,7 @@ package); scipy.stats.t is used only for the reference CDF.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd  # noqa: F401  (type hints for the panel helpers)
 from scipy import stats
 
 
@@ -54,7 +55,15 @@ def diebold_mariano(e1: np.ndarray, e2: np.ndarray, h: int) -> tuple[float, floa
     if h < 1:
         raise ValueError(f"diebold_mariano: h must be >= 1, got {h}")
 
-    d = np.abs(e1) - np.abs(e2)
+    return dm_from_loss_diff(np.abs(e1) - np.abs(e2), h)
+
+
+def dm_from_loss_diff(d: np.ndarray, h: int) -> tuple[float, float]:
+    """HLN-corrected DM statistic and two-sided p-value for a loss-differential
+    series d_t (positive mean = model 1 worse). `diebold_mariano` builds d from
+    two forecasts' absolute errors; the panel test below builds it from a
+    cross-section average per month."""
+    d = np.asarray(d, dtype=float)
     n = len(d)
     if n < 2:
         raise ValueError(f"diebold_mariano: need at least 2 paired observations, got {n}")
@@ -77,6 +86,55 @@ def diebold_mariano(e1: np.ndarray, e2: np.ndarray, h: int) -> tuple[float, floa
 
     p_value = float(2.0 * (1.0 - stats.t.cdf(abs(dm_hln), df=n - 1)))
     return float(dm_hln), p_value
+
+
+def panel_diebold_mariano(loss_diff: "pd.DataFrame", h: int) -> tuple[float, float, int]:
+    """Panel DM with TIME-CLUSTERED variance. `loss_diff` is origin month x crop,
+    d_{t,c} = |e1_{t,c}| - |e2_{t,c}| (NaN where a crop has no forecast that month).
+
+    Stacking the 7 crops into one long series and running the plain DM treats
+    n_months x 7 errors as independent, but crops' prices (and so their
+    forecast errors) move together within a month and overlapping h-step
+    forecasts are serially dependent -- the stacked n is far larger than the
+    information, and the p-value far too small. Here each month is one cluster:
+    the cross-section is averaged to D_t (equal weight per month), and the
+    HLN-corrected DM with h-1 HAC lags is run on the T-month series D_t, so the
+    effective sample size is the number of months. Returns (dm_stat, p, n_months)."""
+    D = loss_diff.mean(axis=1, skipna=True).dropna().sort_index()
+    stat, p = dm_from_loss_diff(D.to_numpy(dtype=float), h)
+    return stat, p, int(len(D))
+
+
+def block_bootstrap_pvalue(
+    loss_diff: "pd.DataFrame", block_len: int, n_boot: int = 5000, seed: int = 0
+) -> tuple[float, int]:
+    """Two-sided moving-block-bootstrap p-value for H0: mean loss differential = 0,
+    resampling whole MONTHS (cross-section averaged, so a month's crops always move
+    together) in overlapping blocks of `block_len` consecutive months to keep the
+    serial dependence of overlapping forecasts. The t-like statistic mean/se is
+    recomputed on each centred resample; p = share of resamples at least as extreme
+    as the observed statistic (with +1 smoothing). Returns (p, n_months). A
+    robustness check on panel_diebold_mariano that does not lean on the HAC
+    estimator or the t reference distribution."""
+    D = loss_diff.mean(axis=1, skipna=True).dropna().sort_index().to_numpy(dtype=float)
+    T = len(D)
+    if T < 2 * block_len:
+        raise ValueError(f"block_bootstrap_pvalue: {T} months is too few for block_len={block_len}")
+    if D.std(ddof=1) == 0.0:  # identical forecasts (e.g. Naive vs Seasonal-Naive at h=12): no difference to test
+        return 1.0, T
+    obs = D.mean() / (D.std(ddof=1) / np.sqrt(T))
+    centred = D - D.mean()
+    rng = np.random.default_rng(seed)
+    n_blocks = int(np.ceil(T / block_len))
+    starts_max = T - block_len
+    extreme = 0
+    for _ in range(n_boot):
+        starts = rng.integers(0, starts_max + 1, size=n_blocks)
+        sample = np.concatenate([centred[s : s + block_len] for s in starts])[:T]
+        sd = sample.std(ddof=1)
+        stat = sample.mean() / (sd / np.sqrt(T)) if sd > 0 else 0.0
+        extreme += abs(stat) >= abs(obs)
+    return float((extreme + 1) / (n_boot + 1)), T
 
 
 def dm_verdict(dm_stat: float, p_value: float, label1: str, label2: str, horizon: int, alpha: float = 0.05) -> str:

@@ -328,3 +328,29 @@ for the crops where it loses), not something I changed in the optimizer. The app
 decision-crop table instead of the pooled MAE/R^2 line. Tests: baseline unit test, committed-table consistency
 (flags match MAEs), no `_R2` in the committed markdown.
 
+### Task 9 -- price model significance (M5)
+
+`90_price_significance.py` stacked the 7 crops into one series (n = 252-315) and ran a plain DM test, treating
+crops' errors as independent. They are not: prices move together within a month, and overlapping h-step forecasts
+are serially dependent. New `stats.dm_test.panel_diebold_mariano` averages the loss differential across crops per
+origin month (each month is a cluster, so n = 36-45 months) and runs the HLN-corrected DM with h-1 HAC lags on that
+series; `block_bootstrap_pvalue` resamples months in overlapping blocks (block = max(h, 6)) as a check that does not
+rely on the HAC estimator. `dm_from_loss_diff` is the shared core (`diebold_mariano` unchanged in behaviour).
+
+| comparison | stacked (before) p | panel p | block-bootstrap p |
+|---|---|---|---|
+| Naive vs XGBoost h=3 | 0.057 | 0.076 | 0.065 |
+| Naive vs XGBoost h=6 | **0.031** | 0.081 | 0.038 |
+| Naive vs XGBoost h=12 | **0.020** | 0.071 | 0.109 |
+| Naive vs Seasonal-Naive h=3 | <0.001 | <0.001 | 0.0004 |
+| Naive vs Seasonal-Naive h=6 | 0.001 | 0.002 | 0.005 |
+| Naive vs Seasonal-Naive h=12 | 1.0 (identical forecasts) | 1.0 | 1.0 |
+
+Claim that got weaker: "Naive significantly beats XGBoost at h=6 and h=12" no longer holds under the panel test
+(only the h=6 bootstrap rejects, borderline). Running the unchanged stacked test on today's library versions gives
+0.035 (h=6) and 0.030 (h=12), not the committed 0.031 / 0.020: the XGBoost rolling backtest is not bit-stable across
+environments (scikit-learn/xgboost versions), which is one more reason not to lean on 0.03-vs-0.05. Tests
+(`tests/test_panel_dm.py`, data-free): one-crop panel equals the plain DM; with a shared monthly shock and no true
+difference over 60 simulated no-effect panels (40 months x 7 crops) the stacked test rejects at p<0.05 in 45% of them, the panel test in 8% (nominal 5%); a real
+effect is still detected; missing crops are averaged over; identical forecasts return p = 1 (the bootstrap
+initially returned a spurious 0.0002 there -- fixed).
