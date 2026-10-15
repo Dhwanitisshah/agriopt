@@ -120,5 +120,5 @@ def test_scenario_region_defaults_to_maharashtra():
 
 
 def test_invalid_region_rejected():
-    with pytest.raises(AssertionError):
+    with pytest.raises(ValueError, match="region"):  # a real exception (an assert would vanish under python -O)
         build_crop_params("market", verbose=False, water_basis="net_irrigation", region="nonexistent")

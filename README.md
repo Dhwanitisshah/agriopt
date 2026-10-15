@@ -108,6 +108,14 @@ would add 14-18% over B2, and knowing the realized **yields** alone closes ~2/3 
 | Seed robustness (10 seeds) | Hypervolume NSGA-II 0.586 +/- 0.007, NSGA-III 0.572 +/- 0.008. Recommended allocation moves 0.18 ha per crop across seeds for NSGA-II (polished) but **0.70 ha for NSGA-III** (7% of the farm) | Risk-aware plans are noticeably less reproducible across seeds than the standard plan; n=10 seeds. |
 | Yield conformal intervals (90% nominal) | Overall Maharashtra empirical coverage = 0.941 (mean width 2.53 t/ha) | Per-crop coverage varies (cotton/tur measured at 0.75) -- always check per-crop before trusting one crop's interval. |
 
+## Screenshots
+
+Captured from the app running on the pinned deploy stack (`requirements-app.txt`), default inputs.
+
+| Recommendation | Trade-offs | Regional view |
+|---|---|---|
+| ![Recommendation tab](docs/img/recommendation.png) | ![Trade-offs tab](docs/img/tradeoffs.png) | ![Regional tab](docs/img/regional.png) |
+
 ## Data sources
 
 - **Yield**: Kaggle [crop-yield-in-indian-states-dataset](https://www.kaggle.com/datasets) (APY-style: area/production/yield by state/crop/season/year)

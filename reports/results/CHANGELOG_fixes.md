@@ -467,3 +467,6 @@ in the medium/large presets; NSGA-III's recommended allocation moves 0.7 ha per 
   `models/` aside; if the last rename failed (a locked directory) the earlier ones were never undone and every later
   run died with `FileNotFoundError` -- it happened to me once while two test processes shared the models directory.
   It now restores what it moved before re-raising.
+
+Follow-up found by the full-suite gate on the Task 11 commit: `test_water_region.py::test_invalid_region_rejected`
+still expected the old `AssertionError`; it now expects the `ValueError` (message mentions `region`).
