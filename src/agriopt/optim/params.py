@@ -171,9 +171,13 @@ def build_crop_params(
     from agriopt.models.price_model import expected_price, load_price_frame
     from agriopt.models.yield_model import expected_yield_saleable
 
-    assert price_mode in ("market", "msp_floor"), price_mode
-    assert water_basis in ("total_need", "net_irrigation"), water_basis
-    assert region in REGIONS, region
+    # input validation must survive `python -O`, so these are not asserts
+    if price_mode not in ("market", "msp_floor"):
+        raise ValueError(f"price_mode must be 'market' or 'msp_floor', got {price_mode!r}")
+    if water_basis not in ("total_need", "net_irrigation"):
+        raise ValueError(f"water_basis must be 'total_need' or 'net_irrigation', got {water_basis!r}")
+    if region not in REGIONS:
+        raise ValueError(f"region must be one of {REGIONS}, got {region!r}")
 
     ref = load_reference()
     price_frame = load_price_frame()

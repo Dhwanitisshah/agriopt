@@ -36,7 +36,7 @@ Writes:
   reports/results/backtest_findings_v2.md        -- narrative, names crops/effects
   reports/results/backtest_decomposition_tight_v2.png -- stacked bar, OURS vs B1_SCALED, tight scenario
 Updates (in place, additively -- existing columns/values unchanged):
-  data/reference/msp_history.csv -- new `provenance` column for every row
+  data/reference/msp_history.csv -- READ-ONLY here (provenance column checked, see scripts/migrations/001_msp_history_provenance.py)
 """
 from __future__ import annotations
 
@@ -59,58 +59,26 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 DECOMP_STRATS = ["B1", "B1_SCALED", "B2", "B3", "OURS", "MODEL_B"]
 ALL_STRATS = DECOMP_STRATS + ["ORACLE"]
 
-# --- Phase 7.1's own MSP provenance verification (step 5) ------------------
-# jowar/soybean/maize 2017 were flagged secondary in Phase 7 (docs/backtest.md
-# "known gaps": sourced from a business-standard comparison table because
-# agricoop.gov.in returned a DNS failure). Re-checked here (same DNS failure
-# reproduced on agricoop.gov.in), and a genuine PRIMARY government source was
-# found instead: a PIB press release (03-Aug-2018, Rajya Sabha Unstarred
-# Question No. 1934 answer, Ministry of Agriculture & Farmers Welfare) whose
-# official Annexure table gives 2017-18-season Cost/MSP for every kharif
-# crop, including JOWAR (Hybrid)=1700, MAIZE=1425, SOYABEEN=3050 -- all three
-# EXACTLY matching the values already in msp_history.csv. Confirmed by
-# fetching https://pib.gov.in/newsite/PrintRelease.aspx?relid=181467 directly.
-VERIFIED_2017_PRIMARY_URL = "https://pib.gov.in/newsite/PrintRelease.aspx?relid=181467"
-VERIFIED_2017_CROPS = {"jowar", "soybean", "maize"}
-
-# domain -> provenance classification for every OTHER row's existing source_url.
-_PRIMARY_DOMAINS = ("desagri.gov.in", "static.pib.gov.in", "pib.gov.in", "www.pib.gov.in", "cacp.dacnet.nic.in")
-_SECONDARY_DOMAINS = ("business-standard.com", "agriculturepost.com", "onmanorama.com", "tribuneindia.com")
+# --- MSP provenance: verified, never rewritten here -----------------------------
+# The `provenance` column of data/reference/msp_history.csv (and the verified PIB citations for
+# jowar/soybean/maize 2017) was written ONCE by scripts/migrations/001_msp_history_provenance.py.
+# This script used to re-write the reference file on every run; an analysis script must not
+# mutate its own inputs, so it now only checks them.
+PROVENANCE_VALUES = {"", "primary", "secondary", "primary_verified_v2"}
 
 
-def _classify_provenance(source_url: str) -> str:
-    if not isinstance(source_url, str) or not source_url.strip():
-        return ""
-    if source_url.startswith("http"):
-        if any(d in source_url for d in _PRIMARY_DOMAINS):
-            return "primary"
-        if any(d in source_url for d in _SECONDARY_DOMAINS):
-            return "secondary"
-        return "secondary"  # unknown http domain -- default to the more conservative label
-    # plain-text citations (year=2025 rows): e.g. "PIB KMS 2025-26 PRID ... (per crop_reference.csv msp_source)"
-    # -- these DO name a specific PIB release, just weren't independently re-fetched by URL in Phase 7; treat as primary.
-    if "pib" in source_url.lower():
-        return "primary"
-    return "secondary"
-
-
-def update_msp_history_provenance() -> pd.DataFrame:
-    """Adds a `provenance` column (primary/secondary/blank) to EVERY row of
-    msp_history.csv, and -- for jowar/soybean/maize 2017 specifically --
-    replaces source_url with the verified primary PIB citation and marks
-    provenance='primary_verified_v2'. Existing crop/year/msp/cost values are
-    NEVER modified -- only source_url (for the 3 rows) and the new
-    provenance column."""
-    df = pd.read_csv(MSP_HISTORY_CSV)
-    df["provenance"] = df["source_url"].apply(_classify_provenance)
-
-    mask = (df["year"] == 2017) & (df["crop"].isin(VERIFIED_2017_CROPS))
-    assert mask.sum() == 3, f"expected exactly 3 rows (jowar/soybean/maize, 2017), found {mask.sum()}"
-    df.loc[mask, "source_url"] = VERIFIED_2017_PRIMARY_URL
-    df.loc[mask, "provenance"] = "primary_verified_v2"
-
-    df.to_csv(MSP_HISTORY_CSV, index=False)
-    print(f"Updated {MSP_HISTORY_CSV} with a provenance column ({mask.sum()} rows verified primary this phase).")
+def verify_msp_history_provenance() -> pd.DataFrame:
+    """Read-only check that msp_history.csv carries the provenance column the
+    backtest reports rely on. Raises (never writes) if it does not."""
+    df = pd.read_csv(MSP_HISTORY_CSV, keep_default_na=False)
+    if "provenance" not in df.columns:
+        raise RuntimeError(
+            f"{MSP_HISTORY_CSV} has no `provenance` column -- run "
+            "`python scripts/migrations/001_msp_history_provenance.py` once (it is a one-off migration)."
+        )
+    bad = set(df["provenance"].unique()) - PROVENANCE_VALUES
+    if bad:
+        raise RuntimeError(f"{MSP_HISTORY_CSV}: unexpected provenance values {sorted(bad)}")
     return df
 
 
@@ -504,7 +472,7 @@ def write_findings_md(fairness_df, win_summary_df, decomp_df, b2_oracle_df) -> N
 
 
 def main() -> None:
-    update_msp_history_provenance()
+    verify_msp_history_provenance()
 
     backtest = load_backtest_module()
     fairness_df, rows_df, b2_oracle_df, decomp_df = run_analysis(backtest)

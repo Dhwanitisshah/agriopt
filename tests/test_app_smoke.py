@@ -203,12 +203,18 @@ def _hide_raw_data():
     import os
 
     moved = []
-    for rel in _RAW_DATA_PATHS_TO_HIDE:
-        src = REPO_ROOT / rel
-        if src.exists():
-            dst = REPO_ROOT / (rel + ".hidden_for_test")
-            os.rename(src, dst)
-            moved.append((src, dst))
+    try:
+        for rel in _RAW_DATA_PATHS_TO_HIDE:
+            src = REPO_ROOT / rel
+            if src.exists():
+                dst = REPO_ROOT / (rel + ".hidden_for_test")
+                os.rename(src, dst)
+                moved.append((src, dst))
+    except OSError:
+        # e.g. a locked directory: put back whatever was already moved, otherwise the
+        # data files stay renamed on disk and every later run fails with FileNotFoundError
+        _restore_raw_data(moved)
+        raise
     return moved
 
 

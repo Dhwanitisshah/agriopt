@@ -12,7 +12,6 @@ from agriopt.optim.baselines import (
     evaluate,
     mix_from_shares,
     nsga2_recommended,
-    profit_max,
     same_profit_min_water,
 )
 from agriopt.optim.params import build_crop_params

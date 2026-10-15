@@ -441,3 +441,29 @@ Still weaker or open after the regeneration: OURS does not beat the current mix 
 water); B2 (profit-max LP) beats OURS in every backtest year; the RF yield model is not clearly better than a 3-year
 mean; state-wise cost of cultivation (Task 12) is not done; the risk-aware presets put 75-78% of profit on sugarcane
 in the medium/large presets; NSGA-III's recommended allocation moves 0.7 ha per crop across seeds.
+
+### Task 11 -- engineering hygiene (M3, M7, L3)
+
+* **Results can no longer go stale silently.** `tests/test_results_not_stale.py` re-solves B1/B2/B3 for the six
+  total-need and the net-irrigation scenarios from the committed cache (per-crop economics + historical shares)
+  and diffs profit / water / fertiliser against `optim_strategies.csv` and `optim_strategies_net.csv` (rtol 1e-6).
+  It needs no gitignored data, so CI runs it. Checked against the Phase-1 CSV (generated before Tasks 3-6):
+  it fails with "tight/market/B1.profit: committed 129,794.13 but re-solving the cache gives 182,833.11".
+* **`61_backtest_v2.py` no longer rewrites `data/reference/msp_history.csv`** on every run. The provenance-column
+  code moved to `scripts/migrations/001_msp_history_provenance.py` (idempotent, already applied); 61 now only
+  *verifies* the column and raises with the migration command if it is missing.
+* **CI also tests the deployed stack.** New `app-pinned` job installs only `requirements-app.txt` (pinned:
+  streamlit 1.64.0, pandas 3.0.6, numpy 2.5.3, scipy 1.18.1, pymoo 0.6.2 ...) on ubuntu and runs the tests that need
+  only the committed cache, plus `smoke_e2e.py` and `check_app_tabs.py`. I could not run GitHub Actions here, so I
+  built the same venv locally: 37 tests, the smoke test and the 8-tab check pass on that stack. It showed that
+  most modules in the existing suite cannot even be imported on the deployed stack (they need joblib/xgboost/
+  scikit-learn/dotenv), which is why the job runs an explicit file list, and that one new test imported the
+  cache-build script (needs joblib) for a helper the app already has -- changed to use `app.data`.
+* **Input validation is no longer `assert`.** `build_crop_params` raises `ValueError` for a bad `price_mode`,
+  `water_basis` or `region` (asserts vanish under `python -O`). Other validation asserts remain in
+  `agriopt.data.rainfall` (`region`, `scenario`) and a few modules -- left alone, outside the brief.
+* **Unused imports removed**: `Ridge` in `yield_model.py`, `profit_max` in `tests/test_optim.py`.
+* **A test helper could strand the data.** `tests/test_app_smoke.py::_hide_raw_data` renames the parquet files and
+  `models/` aside; if the last rename failed (a locked directory) the earlier ones were never undone and every later
+  run died with `FileNotFoundError` -- it happened to me once while two test processes shared the models directory.
+  It now restores what it moved before re-raising.
