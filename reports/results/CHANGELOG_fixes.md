@@ -404,3 +404,40 @@ observed year near the 20th percentile; dry needs more irrigation than normal in
 `test_water_region.py` expectations that encoded the old model (dry >= normal per crop; rice == puddling water at
 normal) are updated, with the reason in each docstring: rabi crops can need slightly less in a year with good
 winter rain (Marathwada wheat 508 vs state-wide normal 516).
+
+### Final regeneration after Tasks 3-10
+
+All of `30, 31, 50, 60, 61, 62, 70, 71, 94` and `40_build_cache` were re-run on the final code (90 and 95 at their
+tasks). One bug surfaced only because the scripts were re-run, not by the test suite: Task 7's partial-foresight
+oracles had no placeholder row for 2020 (no realized outcome), so `60_backtest.py`'s summary crashed on mismatched
+array lengths; fixed, with `test_every_strategy_has_a_row_in_every_year_including_the_unscored_2020`.
+
+Headline numbers, three states: **original** = master at 3c4574a; **Phase 1** = after the economics-fix patch
+only; **final** = after Tasks 3-10.
+
+| headline | original (3c4574a) | Phase 1 | final |
+|---|---|---|---|
+| B3 vs B1 water saving, tight/market | -57.5% | -56.6% | **-58.5%** |
+| B2 vs B1 profit, mean of 6 scenarios (mean crops) | +108.4% (2.0) | +71.3% (3.0) | **+65.1% (3.2)** |
+| OURS vs B1, current/market: profit (water) | +75.6% (-29.7%) | +56.7% (-31.0%) | **+51.6% (-35.7%)** |
+| B1 food share / infeasible scenarios | 0.47 / 2 of 6 (tight water) | 0.27 / 6 of 6 | **0.45 / 2 of 6 (tight water only)** |
+| NSGA-II HV vs LP reference (mean ratio); IGD range | 1.15x; 0.007-0.123 | 1.05x; 0.016-0.047 | **1.07x; 0.015-0.051** |
+| Model B vs Model A: profit / rupee risk / risk per Rs | +1.6% / -4.2% / n.a. | -0.6% / +35.9% / n.a. | **+17.0% / +7.0% / -8.6%** |
+| Seed HV: NSGA-II / NSGA-III | 0.594 / 0.569 | 0.599 / 0.581 | **0.586 / 0.572** |
+| Seed alloc std per crop: NSGA-II / NSGA-III (ha) | 0.29 / 0.35 | 0.30 / 0.37 | **0.18 / 0.70** |
+| Ablation, tight: no-ML-yield loss / costliest variant | 0% / no-cost 12.5% | 15.3% / mean-price 19.6% | **11.3% / mean-price 14.4%** |
+| Backtest mean realized profit, default: B1 / OURS | 419,813 / 486,060 | 162,225 / 200,969 | **229,479 / 230,769** |
+| Backtest OURS profit per 1,000 m3 (B1) | 9,051 (5,636) | 3,938 (2,241) | **3,714 (2,181)** |
+| Backtest capture_ratio_w, OURS | 0.966 | 0.883 | **0.871** |
+| Backtest OURS wins vs raw B1, default / tight | 4/4 / 0/4 | 3/4 / 3/4 | **2/4 / 1/4** (vs B1_SCALED tight: 4/4 -> 3/4 -> 3/4) |
+| B2 allocation == ORACLE (cells) | 8/8 | 1/8 | **0/8** |
+| Region result (OURS profit) | Marathwada 253,960 > Konkan 232,078 (own budgets) | Marathwada 210,216 > Konkan 166,956 | **equal budget: Konkan 273,010 > Marathwada 224,101** |
+| State-wide rice net irrigation (normal) | 0 mm (stale file) | 200 mm | **266 mm** |
+| Yield model | RF wins, pooled R^2 0.938 | same | **beats last-3-yr mean on 3/8 decision crops** |
+| Naive vs XGBoost price DM, h=6 / h=12 | p = 0.031 / 0.020 | same | **panel p = 0.081 / 0.071** |
+| App "profit risk" OURS vs B1, medium preset | +88.7% (independent crops) | same | **+13.4% (Sigma)** |
+
+Still weaker or open after the regeneration: OURS does not beat the current mix on profit in the backtest (it saves
+water); B2 (profit-max LP) beats OURS in every backtest year; the RF yield model is not clearly better than a 3-year
+mean; state-wise cost of cultivation (Task 12) is not done; the risk-aware presets put 75-78% of profit on sugarcane
+in the medium/large presets; NSGA-III's recommended allocation moves 0.7 ha per crop across seeds.

@@ -67,23 +67,45 @@ Headline numbers below are pulled directly from `reports/results/RESULTS_INDEX.m
 consolidated results index spanning all phases of this project; see that file (and the
 experiment-specific `.md` files it cites) for full detail and every caveat.
 
-> **Regenerated Oct 2026 after the economics fixes** (backtest cost units, sugarcane annualization and
-> net-of-H&T price, food-share double counting) on the full dataset. Before/after for every number is in
-> [`reports/results/CHANGELOG_fixes.md`](reports/results/CHANGELOG_fixes.md). Two caveats apply to every
-> optimizer/backtest row: B1 (the "current mix") still violates the 30% food-share minimum under the corrected
-> definition, and the backtest has only n=4 usable years.
+> **Regenerated Oct 2026 after the economics review** (backtest cost units, sugarcane economics, food-share
+> counting, LP-polished recommendation, per-season current mix, Sigma-based risk, backtest information set, monthly
+> water balance). Every number below comes from the regenerated `reports/results/*`; before/after for each is in
+> [`reports/results/CHANGELOG_fixes.md`](reports/results/CHANGELOG_fixes.md). Caveats that apply throughout: the
+> backtest has only **n=4 usable years** (2016-2019), costs are all-India per quintal x Maharashtra yield (so margins
+> are largely set by MSP policy, not measured per state -- open item), and "current mix" B1 is the historical state
+> crop mix run on a 10 ha farm.
+
+**Decision backtest, 2016-2019 -- every baseline (mean realized profit per year, Rs, 10 ha; water-matched capture
+ratio vs a perfect-foresight plan using the same water; profit per 1,000 m3 of water).** All crops planned on 1 May.
+
+| strategy | default water: profit | capture | profit / 1,000 m3 | tight water (0.7x): profit | capture | profit / 1,000 m3 |
+|---|---|---|---|---|---|---|
+| B1 current mix | 229,479 | 0.66 | 2,181 | 229,479 (water-infeasible) | 0.66 | 2,181 |
+| B1_SCALED (closest feasible mix) | 229,479 | 0.66 | 2,181 | 154,455 | 0.51 | 2,097 |
+| B2 profit-max LP | **288,084** | 0.87 | 2,739 | **259,036** | 0.89 | 3,517 |
+| B3 same profit, least water | 220,337 | 0.89 | 3,935 | 228,429 (3 of 4 yrs feasible) | 0.94 | 4,363 |
+| **OURS** (NSGA-II + LP polish) | 230,769 | 0.87 | 3,714 | 200,645 | 0.88 | 3,951 |
+| MODEL_B (risk-aware) | 259,420 | 0.86 | 3,553 | 197,695 | 0.81 | 3,489 |
+| ORACLE (perfect foresight) | 339,253 | 1.00 | 3,802 | 295,022 | 1.00 | 4,094 |
+
+Read it honestly: OURS is a **water-saving** plan, not a profit-maximising one -- at default water it ties the
+current mix on profit (+Rs 1,290/yr, 2 of 4 years) while using 37.6% less water (1.7x the profit per m3); at tight
+water it loses to the raw (water-infeasible) current mix by Rs 28,834/yr but beats the water-feasible B1_SCALED by
+Rs 46,190/yr (3 of 4). B2, the plain profit-max LP, beats OURS in every year of both scenarios. Per-year deltas
+(no p-values: four paired years cannot reject at 5%) are in `backtest_summary_v2.md` section 5. Perfect foresight
+would add 14-18% over B2, and knowing the realized **yields** alone closes ~2/3 of that gap versus ~1/3 for prices
+(`backtest_skill.md`) -- the yield forecast is the weak link, see the yield row below.
 
 | Result | Headline number | Caveat |
 |---|---|---|
-| Profit-per-water vs current mix (decision backtest, 2016-2019) | OURS: mean profit per 1,000 m³ water = ₹3,938 (default) / ₹4,374 (tight) vs current-mix (B1) ₹2,241 -- 1.8-2.0x | Realized profit is now net of cost (before the fix it was ~revenue, which inflated mean yearly profit ~2.6x). In the **tight** scenario OURS ties B1 on total profit (-₹399/yr) while using ~35,600 m³ less water; in the default scenario OURS earns +₹38,744/yr (+24%) and wins 3/4 years. n=4 years (2016-2019), not 5 -- Maharashtra's yield data has zero rows for 2020. Directional, not statistically conclusive (sign p=0.625, Wilcoxon p=0.25). B1 is food-share-infeasible. |
-| Water-matched capture ratio (`capture_ratio_w`) | OURS ≈ 0.88 of the water-matched oracle's profit (was 0.97); MODEL_B (risk-aware) ≈ 0.79-0.80 (was 0.86-0.88) | Weaker than previously reported. B2 no longer equals the oracle (identical in 1/8 cells, was 8/8), so forecast error now registers. Same n=4 caveat. |
-| Same-profit-less-water (B3 vs B1) | B3 matches B1's profit (+0.0%) using **56.6% less water** (tight/market scenario) | B2 (profit-max) beats B1 by +71.3% on average (was +108.4%) but concentrates into ~3 crops (not diversified). B1 itself is infeasible on food share. |
-| Region comparison (Konkan vs Marathwada, net-irrigation basis) | OURS profit: Marathwada ₹210,216 (water 20,051 m³) vs Konkan ₹166,956 (water 13,098 m³) | Marathwada's drier normal-year rainfall raises rice's net irrigation need to 232mm vs Konkan's 200mm; region changes water cost, not the crop's agronomic need. |
-| Risk-aware Model B vs Model A | Model B's recommended point is **no better** than Model A's: profit -0.6%, risk +35.9% (was risk -4.2%) | Claim reversed by the regeneration. Under investigation (see changelog); do not present Model B as de-risking. |
-| Information ablation | Degrading the yield model costs a profit-max planner 15% of profit (was 0%); using a mean price costs most (19.6% tight, was NO_COST at 12.5%) | Ablation is on the single winning model family; the earlier "yield model does not matter" result most likely came from the old sugarcane economics dominating the plan (not separately tested). |
-| Yield model on the 8 decision crops (one step ahead, 2016-2019) | RandomForest beats a last-3-year state-mean baseline on only 3/8 crops (rice, wheat, soybean); mean MAPE 19.4% vs 19.7% | Loses to the baseline on jowar, cotton, sugarcane, tur and maize, and to the best of three naive baselines on 7/8. n=4 years per crop -- directional. The old pooled Maharashtra R² (0.94) mixed tonnes, bales and milled-rice units and is dropped. |
-| Yield model significance (Wilcoxon, Maharashtra test, n=152) | RandomForest significantly beats XGBoost (p=0.009) and Ridge (p<0.001) | The 152 paired errors pool all crops in native units (large-valued crops dominate) -- a pooled screen, not a decision-crop result. RF vs Baseline-Mean is **not** significant (p=0.469) -- "RF is best" is not uniformly supported. |
-| Price model significance (panel Diebold-Mariano, month-clustered) | Naive vs XGBoost is **not significant** at any horizon (p = 0.076 / 0.081 / 0.071 at h = 3 / 6 / 12; block bootstrap 0.065 / 0.038 / 0.109). Naive beats Seasonal-Naive at h = 3 and 6 | Replaces the earlier test that stacked the 7 crops as independent (p = 0.031 at h=6, 0.020 at h=12), which overstated significance: crops' prices move together, so the effective n is the 36-45 origin months. At h=6 the bootstrap and the HLN test disagree -- borderline. |
+| Optimizer vs current mix (E3.1, 10 ha, market prices) | At current water OURS earns **+51.6%** profit with **35.7% less water** than the current mix (tight water: +13.8% with 52.4% less). B3 matches B1's profit with **58.5% less water** (tight/market). B2 averages +65.1% over six scenarios on 3.2 crops | B1 uses all its land (10/10 ha per season) and is food-feasible (45% food share), but violates the water budget in the two tight scenarios, so "vs B1" there is vs an infeasible reference. The recommendation is the exact LP optimum at its own water and fertiliser (NSGA-II alone was 0.1-2.0% below it). B2 concentrates in ~3 crops. |
+| Risk-aware Model B vs Model A (current water) | Profit +17.0%, water +21.2%, fert -1.8%, **rupee risk +7.0%** but risk per rupee of profit **-8.6%** (0.254 vs 0.278) | Model B now optimises risk per rupee of profit, so idling land cannot look safe (the absolute-rupee objective cut profit by half in a risk-heavy test). Reported profit risk is sqrt(x'Sigma x) over 18 years of revenue history; the old independent-crops figure understated it ~5x. Its sugarcane allocation depends on the FRP-price artefact flagged in `risk_strategies.md`. |
+| Information ablation (profit-max planner, loss vs full information) | Tight water: mean-price 14.4%, no-cost-data 12.3%, no-ML-yield 11.3%, MSP-price 11.3%. Current water: MSP-price 12.0%, mean-price 8.9%, no-cost 8.9%, no-ML-yield 4.3% | Single model family; loss for the ML yield is smaller than for prices at current water. Previously no-ML-yield cost 0%, an artefact of the sugarcane bug. |
+| Region comparison, **equal water budget** (net irrigation, normal rain, 54,532 m3 everywhere) | OURS profit: Konkan Rs 273,010 > Maharashtra 258,265 > Madhya 244,796 > Vidarbha 239,686 > Marathwada 224,101 (Konkan +22% over Marathwada). At 0.7x water in a real dry year Marathwada falls to -11.2% vs the current mix | Replaces the per-region-budget comparison, which handed the rainier region a smaller budget. Net irrigation is now a monthly water balance with a real dry year (1986 for Marathwada); the FAO seasonal need is spread uniformly over the season (assumption). |
+| Yield model on the 8 decision crops (one step ahead, 2016-2019) | RandomForest beats a last-3-year state-mean baseline on only **3/8 crops** (rice, wheat, soybean); mean MAPE 19.4% vs 19.7% | Loses to the baseline on jowar, cotton, sugarcane, tur and maize, and to the best of three naive baselines on 7/8. n=4 years per crop. The old pooled Maharashtra R² (0.94) mixed tonnes, bales and milled-rice units and is dropped. |
+| Yield model significance (Wilcoxon, Maharashtra test, n=152) | RandomForest significantly beats XGBoost (p=0.009) and Ridge (p<0.001) | The 152 paired errors pool all crops in native units (large-valued crops dominate) -- a pooled screen, not a decision-crop result. RF vs Baseline-Mean is **not** significant (p=0.469). |
+| Price model significance (panel Diebold-Mariano, month-clustered) | Naive vs XGBoost is **not significant** at any horizon (p = 0.076 / 0.081 / 0.071 at h = 3 / 6 / 12; block bootstrap 0.065 / 0.038 / 0.109). Naive beats Seasonal-Naive at h = 3 and 6 | Replaces a test that stacked the 7 crops as independent (p = 0.031 at h=6, 0.020 at h=12). The effective n is the 36-45 origin months; at h=6 the bootstrap and the HLN test disagree -- borderline. |
+| Seed robustness (10 seeds) | Hypervolume NSGA-II 0.586 +/- 0.007, NSGA-III 0.572 +/- 0.008. Recommended allocation moves 0.18 ha per crop across seeds for NSGA-II (polished) but **0.70 ha for NSGA-III** (7% of the farm) | Risk-aware plans are noticeably less reproducible across seeds than the standard plan; n=10 seeds. |
 | Yield conformal intervals (90% nominal) | Overall Maharashtra empirical coverage = 0.941 (mean width 2.53 t/ha) | Per-crop coverage varies (cotton/tur measured at 0.75) -- always check per-crop before trusting one crop's interval. |
 
 ## Data sources
@@ -110,9 +132,18 @@ Every row the optimizer sees -- live app, cache, and backtest -- is built by one
 - The food-security minimum counts **season-hectares**: a food crop counts once per season it
   occupies, against a capacity of 2 × land, so `food_share` is always in [0, 1].
 
-Effect on the cached presets: sugarcane's share of the recommended plan's profit fell from
-59-81% to 3-26%, and the profit-max baseline no longer plants sugarcane in the Marathwada
-drought preset (1.42 ha → 0).
+Effect on the cached presets: before the fix sugarcane supplied 59-81% of every recommended
+plan's profit; it is now 3-53% (median 31%) in the standard plans. It is still the highest-profit
+crop per hectare (₹61k net vs ₹24k for rice), and in the *risk-aware* plans for the medium and
+large presets it supplies 75-78% of profit -- a concentration to treat with suspicion, because
+sugarcane's measured price risk is an FRP artefact and its cost is an all-India per-quintal
+figure (open item: state-wise cost of cultivation).
+
+Other conventions the numbers depend on (details in `reports/results/CHANGELOG_fixes.md`):
+the recommended plan is the exact LP optimum at its own water and fertiliser (NSGA-II alone
+leaves 0.1-2% of profit on the table); the current-mix baseline B1 is built per season so it uses
+the farm's land; reported profit risk is sqrt(x'Σx) from the revenue covariance; and net
+irrigation is the sum of monthly water deficits.
 - **Crop water need**: FAO Irrigation and Drainage Paper (TM3) crop water requirement tables
 - **Fertilizer dose**: FAO (2005) *Fertilizer use by crop in India*, Table 13 (soybean: ICAR-IISS recommended dose)
 - **Rainfall**: Kaggle `rajanand/rainfall-in-india` (IMD sub-divisional monthly rainfall, 1901-2015)
@@ -147,6 +178,7 @@ python scripts\31_run_risk.py
 python scripts\50_ablation.py
 python scripts\60_backtest.py
 python scripts\61_backtest_v2.py
+python scripts\62_backtest_skill.py     # look-ahead, no-sugarcane and partial-foresight diagnostics
 python scripts\70_water_basis_net.py
 python scripts\71_water_region.py
 python scripts\90_price_significance.py
@@ -154,7 +186,13 @@ python scripts\91_yield_significance.py
 python scripts\92_conformal.py
 python scripts\93_loso.py
 python scripts\94_seed_robustness.py
+python scripts\95_yield_decision_crops.py   # yield model on the 8 decision crops vs naive baselines
 ```
+
+`scripts\42_patch_cache_economics.py` re-derives the cached economics without the models;
+`scripts\migrations\` holds one-off data migrations (already applied to the committed files).
+`tests/test_results_not_stale.py` re-solves the cheap LP rows (B1/B2/B3) from the committed cache
+and fails CI if `optim_strategies*.csv` no longer matches -- re-run scripts 30 and 70 if it does.
 
 Build the app's cache (the only thing the app itself ever reads) and run it:
 
@@ -198,6 +236,11 @@ theme. See `requirements.txt` for the full dev/training dependency set.
 - **Sugarcane's low measured price risk is an FRP artifact**, not genuinely low agronomic risk
   (a fixed administered price has zero month-to-month variance by construction) -- the risk-aware
   model's sugarcane allocation is sensitive to this assumption (see `reports/results/risk_strategies.md`).
+- **Cost margins are mostly set by policy**: cost per quintal is all-India (derived from MSP margins for most
+  crops), so jowar, soybean and cotton carry an identical margin by construction. A state-wise
+  CACP cost of cultivation (Rs/ha) for Maharashtra is the single most valuable missing input.
+- **The yield model does not clearly beat a 3-year average** for most decision crops (see Key results), while
+  yield error is the largest source of regret in the backtest.
 - Future work: district-level yield/cost data, state-specific (not all-India) cost of cultivation,
   a citable percolation/seepage figure for puddled rice, and extending the backtest window past
   2020 once more recent Maharashtra yield data becomes available.
@@ -207,6 +250,10 @@ theme. See `requirements.txt` for the full dev/training dependency set.
 ```powershell
 pytest -q
 ```
+
+CI (`.github/workflows/tests.yml`) runs two jobs: the full requirements with the cache-only subset
+(`pytest -m "not needs_data"`), and the deployed stack -- only `requirements-app.txt`, pinned -- with the
+tests, headless smoke test and tab check that need nothing but the committed cache.
 
 ## Layout
 

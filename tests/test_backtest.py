@@ -134,6 +134,17 @@ def test_partial_foresight_oracles_are_reported_and_bounded_by_oracle():
             assert by[name] <= by["ORACLE"] + 1e-3 * max(1.0, abs(by["ORACLE"]))
 
 
+def test_every_strategy_has_a_row_in_every_year_including_the_unscored_2020():
+    """2020 has no realized outcome, but the summary pairs per-strategy arrays across years, so
+    every strategy (the partial-foresight oracles included) needs a placeholder row there."""
+    backtest = _load_backtest_module()
+    rows_2019, _ = backtest.run_year(2019)
+    rows_2020, _ = backtest.run_year(2020)
+    strategies = set(pd.DataFrame(rows_2019)["strategy"])
+    assert strategies == set(backtest.STRATEGY_ORDER)
+    assert set(pd.DataFrame(rows_2020)["strategy"]) == strategies
+
+
 # --- no-leakage: risk Sigma's deviation matrix ------------------------------
 
 

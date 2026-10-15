@@ -187,9 +187,10 @@ def run_year(
             x_store[label]["ORACLE"] = None
             x_store[label]["ORACLE_PRICE"] = None
             x_store[label]["ORACLE_YIELD"] = None
-            rows.append({"year": t, "scenario": label, "strategy": "ORACLE", "feasible": False, "planned_profit": np.nan,
-                         "realized_profit": np.nan, "water_m3": np.nan, "fert_kg": np.nan, "forecast_error": np.nan,
-                         "missing_realized_crops": ";".join(missing_realized)})
+            for oracle_name in ("ORACLE", "ORACLE_PRICE", "ORACLE_YIELD"):  # same placeholder row for each, so shapes line up
+                rows.append({"year": t, "scenario": label, "strategy": oracle_name, "feasible": False, "planned_profit": np.nan,
+                             "realized_profit": np.nan, "water_m3": np.nan, "fert_kg": np.nan, "forecast_error": np.nan,
+                             "missing_realized_crops": ";".join(missing_realized)})
 
     return rows, {
         "missing_realized": missing_realized,

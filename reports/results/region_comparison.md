@@ -24,16 +24,16 @@ Compares the recommended allocation (OURS, NSGA-II + pseudo-weights) at the `cur
 
 | region | strategy | profit (Rs) | water_m3 |
 |---|---|---|---|
-| maharashtra (state-wide) | B1 | 129794 | 27707 |
+| maharashtra (state-wide) | B1 | 182833 | 54532 |
 | marathwada | B1 | 182833 | 60606 |
 | konkan | B1 | 182833 | 51788 |
-| maharashtra (state-wide) | B2 | 261578 | 27707 |
+| maharashtra (state-wide) | B2 | 364071 | 54532 |
 | marathwada | B2 | 361474 | 60606 |
 | konkan | B2 | 376334 | 51788 |
-| maharashtra (state-wide) | B3 | 129794 | 5101 |
+| maharashtra (state-wide) | B3 | 182833 | 21520 |
 | marathwada | B3 | 182833 | 24744 |
 | konkan | B3 | 182833 | 19639 |
-| maharashtra (state-wide) | OURS | 194044 | 16287 |
+| maharashtra (state-wide) | OURS | 258265 | 36519 |
 | marathwada | OURS | 248237 | 38863 |
 | konkan | OURS | 253235 | 31905 |
 
@@ -86,6 +86,6 @@ Budget = 0.7x / 1.0x of the STATE-WIDE normal-year B1 net-irrigation footprint, 
 
 - Marathwada's own (drier) normal-year effective rainfall pushes rice's net irrigation to 322mm vs 266mm state-wide (+21%) -- Marathwada's season-window rainfall covers noticeably less of rice's FAO TM3 need than the state-wide average, making rice relatively more water-expensive there.
 - Konkan's high monsoon rainfall keeps rice's net irrigation at 237mm (essentially just RICE_EXTRA_MM's puddling-water floor -- see docs/water.md 8.2), the lowest of the 3 regions shown, since Konkan's own Kharif-season Peff comfortably exceeds rice's total water need.
-- B1 (current mix)'s own net-irrigation water footprint under region=marathwada is +118.7% vs the state-wide maharashtra figure -- since B1's crop mix is fixed, this change is driven entirely by how much of the SAME crop mix's water need that region's own rainfall covers.
-- B1 (current mix)'s own net-irrigation water footprint under region=konkan is +86.9% vs the state-wide maharashtra figure -- since B1's crop mix is fixed, this change is driven entirely by how much of the SAME crop mix's water need that region's own rainfall covers.
+- B1 (current mix)'s own net-irrigation water footprint under region=marathwada is +11.1% vs the state-wide maharashtra figure -- since B1's crop mix is fixed, this change is driven entirely by how much of the SAME crop mix's water need that region's own rainfall covers.
+- B1 (current mix)'s own net-irrigation water footprint under region=konkan is -5.0% vs the state-wide maharashtra figure -- since B1's crop mix is fixed, this change is driven entirely by how much of the SAME crop mix's water need that region's own rainfall covers.
 - All `*_region` outputs (net_irrigation_by_region.{csv,md}, optim_strategies_marathwada.{csv,md}, optim_strategies_konkan.{csv,md}, region_comparison.md) are NEW files -- no Phase 1-8 output (including the `*_net` files) was modified.
